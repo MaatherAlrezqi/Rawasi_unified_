@@ -1,0 +1,284 @@
+import React, { useEffect, useState } from "react";
+import {
+  Routes,
+  Route,
+  Navigate,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
+
+import rawasiLogo from "./assets/photo_2025-08-13_21-03-51.png";
+
+import Header from "./components/Header.jsx";
+import Footer from "./components/Footer.jsx";
+import { OtpModal, ForgotModal } from "./components/Modals.jsx";
+import FlowProgress from "./components/Progress.jsx";
+
+import Landing from "./pages/Landing.jsx";
+import Project from "./pages/Project.jsx";
+import Recommendations from "./pages/Recommendations.jsx";
+import Messages from "./pages/Messages.jsx";
+import Dashboard from "./pages/Dashboard.jsx";
+import Login from "./pages/auth/Login.jsx";
+import Register from "./pages/auth/Register.jsx";
+
+// Provider pages
+import ProviderDashboard from "./provider/pages/ProviderDashboard.jsx";
+import ProviderDashboards from "./provider/pages/ProviderDashboards.jsx";
+import ProviderRequests from "./provider/pages/ProviderRequests.jsx";
+import ProviderMessages from "./provider/pages/ProviderMessages.jsx";
+import ProviderReports from "./provider/pages/ProviderReports.jsx";
+import ProviderProfile from "./provider/pages/ProviderProfile.jsx";
+
+import { loadLS, saveLS, uid } from "./lib/utils.js";
+import { seedUsers } from "./lib/auth.js";
+
+// ---- Guards ---------------------------------------------------------------
+
+const RequireProject = ({ project, children }) =>
+  project ? children : <Navigate to="/project" replace />;
+
+// If you want to later protect owner routes too, you can expand this.
+const RequireAuth = ({ children }) => children;
+
+const RequireRole = ({ role, children, auth }) => {
+  if (!auth) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (auth.role !== role) {
+    // Redirect to the correct area based on actual role
+    if (auth.role === "provider") {
+      return <Navigate to="/provider/dashboard" replace />;
+    }
+    // Default: project owner
+    return <Navigate to="/project" replace />;
+  }
+
+  return children;
+};
+
+// ---- App ------------------------------------------------------------------
+
+export default function App() {
+  // Project flow state
+  const [project, setProject] = useState(null);
+
+  // Auth state
+  const [users, setUsers] = useState(() => loadLS("rawasi_users", seedUsers()));
+  const [auth, setAuth] = useState(() => loadLS("rawasi_auth", null));
+  const [otpModal, setOtpModal] = useState({ open: false, email: "" });
+  const [forgotModal, setForgotModal] = useState({ open: false });
+
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // Persist users & auth
+  useEffect(() => saveLS("rawasi_users", users), [users]);
+  useEffect(() => saveLS("rawasi_auth", auth), [auth]);
+
+  // Show progress only on flow routes (not on Landing or Dashboard)
+  const showFlowProgress = ["/project", "/recs", "/messages"].some((p) =>
+    location.pathname.startsWith(p)
+  );
+
+  // Detect provider area for layout (optional)
+  const isProviderArea = location.pathname.startsWith("/provider");
+
+  // ---- Auth handlers -------------------------------------------------------
+
+  function handleRegister(payload) {
+    if (
+      users.some((u) => u.email.toLowerCase() === payload.email.toLowerCase())
+    ) {
+      return { ok: false, error: "Email already registered" };
+    }
+    const newUser = { id: uid(), ...payload, createdAt: Date.now() };
+    setUsers((prev) => [...prev, newUser]);
+    setOtpModal({ open: true, email: payload.email });
+    return { ok: true };
+  }
+
+  function verifyOtp(code) {
+    if (!/^[0-9]{6}$/.test(code)) {
+      return { ok: false, error: "Enter 6 digits" };
+    }
+    setOtpModal({ open: false, email: "" });
+    navigate("/login");
+    return { ok: true };
+  }
+
+  function handleLogin({ email, password }) {
+    const user = users.find(
+      (u) =>
+        u.email.toLowerCase() === email.toLowerCase() &&
+        u.password === password
+    );
+    if (!user) return { ok: false, error: "Invalid credentials" };
+
+    const authData = {
+      id: user.id,
+      name: user.name,
+      role: user.role, // "owner" or "provider"
+      email: user.email,
+      phone: user.phone,
+    };
+
+    setAuth(authData);
+
+    // Redirect based on role
+    if (authData.role === "provider") {
+      navigate("/provider/dashboard");
+    } else {
+      // Default: project owner
+      navigate("/project");
+    }
+
+    return { ok: true };
+  }
+
+  function logout() {
+    setAuth(null);
+    // You can also send them to "/" if you prefer:
+    // navigate("/");
+    navigate("/project");
+  }
+
+  // ---- Render -------------------------------------------------------------
+
+  return (
+    <div className="min-h-screen bg-white text-slate-900 flex flex-col">
+      {/* Header is hidden on provider area if you want full-screen provider UI */}
+      {!isProviderArea && (
+        <Header logoUrl={rawasiLogo} auth={auth} onLogout={logout} />
+      )}
+
+      <main className="mx-auto max-w-7xl px-4 pt-2 flex-1 w-full">
+        {showFlowProgress && <FlowProgress />}
+
+        <Routes>
+          {/* Landing */}
+          <Route path="/" element={<Landing />} />
+
+          {/* Auth */}
+          <Route
+            path="/login"
+            element={
+              <Login
+                onSubmit={handleLogin}
+                onForgot={() => setForgotModal({ open: true })}
+              />
+            }
+          />
+          <Route
+            path="/register"
+            element={<Register onSubmit={handleRegister} />}
+          />
+
+          {/* Project Owner Flow */}
+          <Route
+            path="/project"
+            element={
+              <Project
+                logoUrl={rawasiLogo}
+                onComplete={(p) => {
+                  setProject(p);
+                  navigate("/recs");
+                }}
+              />
+            }
+          />
+          <Route
+            path="/recs"
+            element={
+              <RequireProject project={project}>
+                <Recommendations project={project} />
+              </RequireProject>
+            }
+          />
+          <Route
+            path="/messages"
+            element={<Messages onProceed={() => navigate("/dashboard")} />}
+          />
+          <Route
+            path="/dashboard"
+            element={
+              <Dashboard
+                project={project}
+                onStartProject={() => navigate("/project")}
+              />
+            }
+          />
+
+          {/* Provider Portal */}
+          <Route
+            path="/provider/dashboard"
+            element={
+              <RequireRole role="provider" auth={auth}>
+                <ProviderDashboard />
+              </RequireRole>
+            }
+          />
+          <Route
+            path="/provider/dashboards"
+            element={
+              <RequireRole role="provider" auth={auth}>
+                <ProviderDashboards />
+              </RequireRole>
+            }
+          />
+          <Route
+            path="/provider/requests"
+            element={
+              <RequireRole role="provider" auth={auth}>
+                <ProviderRequests />
+              </RequireRole>
+            }
+          />
+          <Route
+            path="/provider/messages"
+            element={
+              <RequireRole role="provider" auth={auth}>
+                <ProviderMessages />
+              </RequireRole>
+            }
+          />
+          <Route
+            path="/provider/reports"
+            element={
+              <RequireRole role="provider" auth={auth}>
+                <ProviderReports />
+              </RequireRole>
+            }
+          />
+          <Route
+            path="/provider/profile"
+            element={
+              <RequireRole role="provider" auth={auth}>
+                <ProviderProfile />
+              </RequireRole>
+            }
+          />
+
+          {/* Fallback */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </main>
+
+      {/* Modals always available */}
+      <OtpModal
+        open={otpModal.open}
+        email={otpModal.email}
+        onClose={() => setOtpModal({ open: false, email: "" })}
+        onVerify={verifyOtp}
+      />
+      <ForgotModal
+        open={forgotModal.open}
+        onClose={() => setForgotModal({ open: false })}
+      />
+
+      {/* Footer hidden for provider area too */}
+      {!isProviderArea && <Footer logoUrl={rawasiLogo} />}
+    </div>
+  );
+}
