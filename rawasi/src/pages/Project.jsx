@@ -1,4 +1,4 @@
-// src/pages/Project.jsx - COMPLETE VERSION WITH COST & TIMELINE ML MODEL INTEGRATION
+// C:\Users\aisha\Downloads\Rawasi\rawasi\src\pages\Project.jsx
 import React, { useMemo, useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -150,6 +150,7 @@ function QuickPreferencesSidebar({ answers, setAnswers }) {
     </motion.div>
   );
 }
+
 function LiveEstimator({
   aiPrediction,
   timelinePrediction,
@@ -493,23 +494,84 @@ function ProjectWizard({ onComplete }) {
     setTimeout(() => setStep((s) => clamp(s - 1, 0, 1)), 50);
   };
 
+  // 🔥 NEW: Save project in Supabase.projects then call onComplete
   const submit = async () => {
     setError("");
     setIsSubmitting(true);
+
     try {
+      // 1) Get logged-in user
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+
+      if (sessionError) throw sessionError;
+      if (!session?.user) {
+        setError("Please login to save your project.");
+        setIsSubmitting(false);
+        return;
+      }
+
+      const userId = session.user.id;
+
+      // 2) Build payload matching `projects` table
+      const payload = {
+        user_id: userId,
+        name: project.name,
+        type: project.type,
+        location: project.location,
+        size_sqm: project.sizeSqm,
+        n_floors: project.Nfloors,
+        budget: project.budget,
+        timeline_months: project.timelineMonths,
+        tech_needs: project.techNeeds.length ? project.techNeeds : null,
+
+        want_speed: answers.wantSpeed,
+        need_insulation: answers.needInsulation,
+        need_quiet: answers.needQuiet,
+        need_fire: answers.needFire,
+        plan_changes: answers.planChanges,
+        need_water: answers.needWater,
+
+        // نخزّن الـ AI prediction كـ JSON في العمود ai_prediction (jsonb)
+        ai_prediction:
+          aiPrediction?.success && aiPrediction
+            ? {
+                predicted_cost: aiPrediction.predicted_cost,
+                confidence_interval: aiPrediction.confidence_interval,
+                cost_per_sqm: aiPrediction.cost_per_sqm,
+              }
+            : null,
+
+        // حالياً ما نرفع صورة المخطط إلى التخزين، فـ نخلي plan_image_url = null / default
+        // plan_image_url: null,
+      };
+
+      // 3) Insert into projects
+      const { data, error: insertError } = await supabase
+        .from("projects")
+        .insert(payload)
+        .select()
+        .single();
+
+      if (insertError) throw insertError;
+
+      console.log("✅ Project saved in Supabase:", data);
+
+      // 4) Pass saved project (with id) + extra info to Recommendations page
       onComplete?.({
-        ...project,
+        ...data, // contains id, columns from DB
         answers,
-        aiPrediction: aiPrediction?.success
-          ? aiPrediction.predicted_cost
-          : null,
-        timelinePrediction: timelinePrediction?.success
-          ? timelinePrediction.predicted_months
-          : null,
+        aiPrediction,
+        timelinePrediction,
       });
     } catch (err) {
       console.error("Submission failed:", err);
-      setError("Could not continue. Please review your inputs and try again.");
+      setError(
+        "Could not continue. Please review your inputs and try again. " +
+          (err.message || "")
+      );
     } finally {
       setIsSubmitting(false);
     }

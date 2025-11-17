@@ -1,369 +1,260 @@
 import React, { useState } from 'react';
-import { Link, useLocation, useSearchParams } from 'react-router-dom';
+import ProviderSidebar from './ProviderSidebar';
 import {
-  Activity, BarChart3, Bell, Briefcase, Calendar, ChevronRight,
-  DollarSign, Download, FolderOpen, Home, MessageSquare,
-  Users, User, FileText, CheckCircle2, AlertTriangle, Package,
-  Eye, TrendingUp, Shield, Menu
+  BarChart3, TrendingUp, DollarSign, Calendar, Download, Filter,
+  FileText, CheckCircle2, Clock, AlertTriangle, Users, Briefcase
 } from 'lucide-react';
 
 export default function ProviderReports() {
-  const location = useLocation();
-  const [searchParams] = useSearchParams();
-  const projectIdFromUrl = searchParams.get('project');
-  
-  const [selectedProjectForReport, setSelectedProjectForReport] = useState(projectIdFromUrl || '');
-  const [generatingReport, setGeneratingReport] = useState(null);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [dateRange, setDateRange] = useState('month');
+  const [reportType, setReportType] = useState('overview');
 
-  const projects = [
-    { id: '1', title: 'Modern Villa Construction', client: 'Mohammed Al-Rashid', location: 'Riyadh' },
-    { id: '2', title: 'Commercial Plaza Development', client: 'Al-Noor Group', location: 'Jeddah' },
-    { id: '3', title: 'School Building Renovation', client: 'Ministry of Education', location: 'Dammam' },
-    { id: '4', title: 'Luxury Apartment Complex', client: 'Urban Developers', location: 'Riyadh' },
-    { id: '5', title: 'Hospital Wing Extension', client: 'Health Ministry', location: 'Medina' },
-    { id: '6', title: 'Warehouse & Logistics Center', client: 'Saudi Logistics Co.', location: 'Khobar' }
-  ];
-
-  const reportTypes = [
+  const stats = [
     {
-      id: 'financial',
-      title: 'Financial Report',
-      description: 'Comprehensive budget analysis, expenses breakdown, revenue tracking, and cost forecasting',
+      label: 'Total Revenue',
+      value: 'SAR 12.5M',
+      change: '+15%',
       icon: DollarSign,
-      color: 'blue',
-      sections: ['Budget Overview', 'Expense Categories', 'Payment Schedule', 'Cost Analysis']
+      color: 'bg-blue-100 text-blue-600'
     },
     {
-      id: 'progress',
-      title: 'Progress Report',
-      description: 'Timeline tracking, milestone achievements, task completion rates, and schedule adherence',
-      icon: Activity,
-      color: 'orange',
-      sections: ['Timeline Status', 'Milestones', 'Tasks Completed', 'Delays & Issues']
+      label: 'Active Projects',
+      value: '12',
+      change: '+3',
+      icon: Briefcase,
+      color: 'bg-orange-100 text-orange-600'
     },
     {
-      id: 'team',
-      title: 'Team Performance Report',
-      description: 'Resource allocation, team productivity, attendance tracking, and performance metrics',
-      icon: Users,
-      color: 'blue',
-      sections: ['Team Overview', 'Attendance', 'Productivity', 'Resource Utilization']
-    },
-    {
-      id: 'risk',
-      title: 'Risk Assessment Report',
-      description: 'Identified risks, impact analysis, mitigation strategies, and contingency planning',
-      icon: AlertTriangle,
-      color: 'orange',
-      sections: ['Risk Identification', 'Impact Analysis', 'Mitigation Plans', 'Monitoring']
-    },
-    {
-      id: 'quality',
-      title: 'Quality Control Report',
-      description: 'Inspection results, compliance audits, quality standards adherence, and corrective actions',
+      label: 'Completed Tasks',
+      value: '247',
+      change: '+18%',
       icon: CheckCircle2,
-      color: 'blue',
-      sections: ['Inspections', 'Compliance', 'Standards', 'Corrections']
+      color: 'bg-emerald-100 text-emerald-600'
     },
     {
-      id: 'materials',
-      title: 'Materials & Inventory Report',
-      description: 'Material usage tracking, inventory levels, supplier performance, and procurement status',
-      icon: Package,
-      color: 'orange',
-      sections: ['Material Usage', 'Inventory Status', 'Suppliers', 'Procurement']
-    },
-    {
-      id: 'safety',
-      title: 'Safety & Compliance Report',
-      description: 'Safety incidents, training records, compliance status, and regulatory adherence',
-      icon: Shield,
-      color: 'blue',
-      sections: ['Safety Records', 'Training', 'Incidents', 'Compliance']
-    },
-    {
-      id: 'comprehensive',
-      title: 'Full Project Report',
-      description: 'Complete overview including all metrics, analytics, and detailed insights across all areas',
-      icon: FileText,
-      color: 'orange',
-      sections: ['Executive Summary', 'All Metrics', 'Analytics', 'Recommendations']
+      label: 'Team Members',
+      value: '48',
+      change: '+5',
+      icon: Users,
+      color: 'bg-purple-100 text-purple-600'
     }
   ];
 
-  const handleDownload = (reportType) => {
-    if (!selectedProjectForReport) return;
-    
-    setGeneratingReport(reportType);
-    
-    setTimeout(() => {
-      const project = projects.find(p => p.id === selectedProjectForReport);
-      console.log(`Generating ${reportType} report for project: ${project?.title}`);
-      alert(`Downloading ${reportType} report for ${project?.title}`);
-      setGeneratingReport(null);
-    }, 1500);
+  const projectPerformance = [
+    { project: 'Riyadh North Hospital', progress: 85, budget: 92, timeline: 'On track', status: 'good' },
+    { project: 'Al Academy Campus', progress: 67, budget: 78, timeline: 'Slight delay', status: 'warning' },
+    { project: 'Palm Valley Mall', progress: 100, budget: 98, timeline: 'Completed', status: 'excellent' },
+    { project: 'Tech Hub Building', progress: 45, budget: 55, timeline: 'On track', status: 'good' }
+  ];
+
+  const financialData = [
+    { category: 'Materials', amount: 6500000, percentage: 52 },
+    { category: 'Labor', amount: 4375000, percentage: 35 },
+    { category: 'Equipment', amount: 1625000, percentage: 13 }
+  ];
+
+  const getStatusColor = (status) => {
+    const colors = {
+      excellent: 'text-green-600 bg-green-50 border-green-200',
+      good: 'text-blue-600 bg-blue-50 border-blue-200',
+      warning: 'text-yellow-600 bg-yellow-50 border-yellow-200',
+      danger: 'text-red-600 bg-red-50 border-red-200'
+    };
+    return colors[status] || colors.good;
   };
-
-  const ReportCard = ({ report }) => {
-    const Icon = report.icon;
-    const isGenerating = generatingReport === report.id;
-
-    return (
-      <div className="group bg-white rounded-2xl p-6 border border-slate-200 hover:border-orange-300 hover:shadow-xl hover:shadow-orange-500/10 transition-all duration-300">
-        <div className="flex items-start gap-4 mb-4">
-          <div className={`p-3 ${report.color === 'orange' ? 'bg-orange-50 group-hover:bg-orange-100' : 'bg-blue-50 group-hover:bg-blue-100'} rounded-xl transition-colors`}>
-            <Icon className={`w-6 h-6 ${report.color === 'orange' ? 'text-orange-600' : 'text-blue-600'}`} />
-          </div>
-          <div className="flex-1">
-            <h3 className="font-bold text-slate-900 mb-1 group-hover:text-orange-600 transition-colors">
-              {report.title}
-            </h3>
-            <p className="text-sm text-slate-600 leading-relaxed">{report.description}</p>
-          </div>
-        </div>
-        
-        <div className="mb-4 p-3 bg-slate-50 rounded-xl">
-          <p className="text-xs font-medium text-slate-700 mb-2">Report Sections:</p>
-          <div className="flex flex-wrap gap-2">
-            {report.sections.map((section, idx) => (
-              <span key={idx} className="text-xs px-2 py-1 bg-white rounded-lg text-slate-600 border border-slate-200">
-                {section}
-              </span>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex gap-2">
-          <button
-            onClick={() => handleDownload(report.id)}
-            disabled={!selectedProjectForReport || isGenerating}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-medium transition-all duration-300 ${
-              !selectedProjectForReport
-                ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                : isGenerating
-                ? 'bg-gradient-to-r from-green-600 to-green-700 text-white'
-                : 'bg-gradient-to-r from-blue-600 to-blue-700 text-white hover:shadow-lg hover:shadow-blue-500/30 hover:scale-105'
-            }`}
-          >
-            {isGenerating ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                Generating...
-              </>
-            ) : (
-              <>
-                <Download className="w-4 h-4" />
-                Download PDF
-              </>
-            )}
-          </button>
-          <button 
-            disabled={!selectedProjectForReport}
-            className={`px-4 py-2.5 rounded-xl transition-all ${
-              !selectedProjectForReport
-                ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                : 'border border-slate-300 hover:border-orange-500 hover:bg-orange-50 text-slate-700 hover:text-orange-600'
-            }`}
-          >
-            <Eye className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-    );
-  };
-
-const navItems = [
-  { label: "Overview",   icon: Home,      to: "/provider/dashboard" },
-  { label: "Dashboards", icon: Briefcase, badge: 4, to: "/provider/dashboards" },
-  { label: "Requests",   icon: FolderOpen, badge: 3, to: "/provider/requests" },
-  { label: "Messages",   icon: MessageSquare, badge: 2, to: "/provider/messages" },
-  { label: "Reports",    icon: BarChart3, to: "/provider/reports" },
-  { label: "Profile",    icon: User,      to: "/provider/profile" }
-];
 
   return (
-    <div className="flex min-h-screen bg-gradient-to-br from-slate-100 via-slate-50 to-orange-50/20">
-      {/* Left Sidebar */}
-    <aside
-  className={`fixed left-0 top-0 h-full bg-gradient-to-b from-slate-900 via-slate-900/95 to-slate-950 text-white transition-all duration-300 z-50 ${
-    sidebarOpen ? 'w-64' : 'w-20'
-  }`}
->
-        <div className="p-6 border-b border-slate-700/50">
-          <div className="flex items-center gap-3">
-            <img 
-               src="/photo_2025-08-13_21-03-51.png"
-              alt="Rawasi" 
-              className="w-10 h-10 rounded-xl shadow-lg"
-            />
-            {sidebarOpen && (
-              <div>
-                <div className="text-xl font-bold bg-gradient-to-r from-orange-400 to-amber-400 bg-clip-text text-transparent">
-                  RAWASI
-                </div>
-                <div className="text-xs text-orange-400 font-medium -mt-0.5">Provider Portal</div>
-              </div>
-            )}
-          </div>
-        </div>
+    <div className="flex min-h-screen bg-gradient-to-br from-slate-50 via-white to-orange-50/30">
+      <ProviderSidebar />
 
-       <nav className="p-4 space-y-2">
-  {navItems.map((item) => {
-    const Icon = item.icon;
-    const isActive = location.pathname === item.to;
-
-    return (
-      <Link
-        key={item.to}
-        to={item.to}
-        className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 group ${
-          isActive
-            ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-lg shadow-orange-500/50'
-            : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-        }`}
-      >
-        <Icon className="w-5 h-5 flex-shrink-0" />
-        {sidebarOpen && (
-          <>
-            <span className="font-medium">{item.label}</span>
-
-            {item.badge && (
-              <span className="ml-auto px-2 py-0.5 text-xs font-semibold bg-orange-500 text-white rounded-full">
-                {item.badge}
-              </span>
-            )}
-          </>
-        )}
-      </Link>
-    );
-  })}
-</nav>
-
-        <button
-          onClick={() => setSidebarOpen(!sidebarOpen)}
-          className="absolute -right-3 top-20 bg-slate-800 text-white p-1.5 rounded-full shadow-lg hover:bg-slate-700 transition-all"
-        >
-          {sidebarOpen ? <ChevronRight className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
-        </button>
-
-        {sidebarOpen && (
-          <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-slate-700/50">
-            <div className="flex items-center gap-3 p-3 rounded-xl hover:bg-slate-800 cursor-pointer transition-all">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center text-white font-bold shadow-lg">
-                AM
-              </div>
-              <div>
-                <p className="text-sm font-medium text-white">Ahmad Mohammed</p>
-                <p className="text-xs text-slate-400">Provider</p>
-              </div>
+      <main className="flex-1 p-8">
+        {/* Header */}
+        <div className="mb-8">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold text-slate-900 mb-2">Reports & Analytics</h1>
+              <p className="text-slate-600">Track performance and generate insights</p>
             </div>
-          </div>
-        )}
-      </aside>
-
-      {/* Main Content */}
-      <main className={`flex-1 transition-all duration-300 ${sidebarOpen ? 'ml-64' : 'ml-20'}`}>
-        <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-xl border-b border-slate-200 shadow-sm">
-          <div className="px-6 py-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-2xl font-bold text-slate-900">Project Reports</h1>
-                <p className="text-sm text-slate-600 mt-1">Generate and download comprehensive project reports</p>
-              </div>
-              <button className="relative p-2.5 rounded-xl hover:bg-orange-50 text-slate-600 hover:text-orange-600 transition-all">
-                <Bell className="h-5 w-5" />
-                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+            <div className="flex items-center gap-3">
+              <select
+                value={dateRange}
+                onChange={(e) => setDateRange(e.target.value)}
+                className="px-4 py-3 rounded-xl border-2 border-orange-200 focus:border-orange-500 focus:ring-2 focus:ring-orange-200 outline-none transition-all"
+              >
+                <option value="week">This Week</option>
+                <option value="month">This Month</option>
+                <option value="quarter">This Quarter</option>
+                <option value="year">This Year</option>
+              </select>
+              <button className="flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-orange-500 to-amber-600 text-white font-medium hover:shadow-lg transition-all">
+                <Download className="w-5 h-5" />
+                Export Report
               </button>
             </div>
           </div>
-        </header>
+        </div>
 
-        <div className="p-6 space-y-6">
-          <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
-            <div className="flex items-start gap-4">
-              <div className="p-3 bg-orange-50 rounded-xl">
-                <FileText className="w-6 h-6 text-orange-600" />
+        {/* Stats Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          {stats.map((stat, index) => (
+            <div key={index} className="bg-white rounded-2xl border-2 border-orange-100 p-6 hover:shadow-lg transition-all">
+              <div className="flex items-center justify-between mb-4">
+                <div className={`p-3 rounded-xl ${stat.color}`}>
+                  <stat.icon className="w-6 h-6" />
+                </div>
+                <span className="text-sm font-semibold text-green-600">{stat.change}</span>
               </div>
-              <div className="flex-1">
-                <label className="block text-sm font-medium text-slate-700 mb-3">
-                  Select Project for Report Generation
-                </label>
-                <select 
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500 transition-all text-slate-900 font-medium"
-                  value={selectedProjectForReport}
-                  onChange={(e) => setSelectedProjectForReport(e.target.value)}
-                >
-                  <option value="">-- Select a Project --</option>
-                  {projects.map((project) => (
-                    <option key={project.id} value={project.id}>
-                      {project.title} - {project.client} ({project.location})
-                    </option>
-                  ))}
-                </select>
-                {!selectedProjectForReport && (
-                  <p className="mt-2 text-sm text-orange-600">
-                    ⓘ Please select a project to enable report downloads
-                  </p>
-                )}
-                {selectedProjectForReport && (
-                  <div className="mt-3 flex items-center gap-2 text-sm text-green-600">
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>Project selected. You can now download reports below.</span>
+              <div className="text-2xl font-bold text-slate-900 mb-1">{stat.value}</div>
+              <div className="text-sm text-slate-600">{stat.label}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Charts Row */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          {/* Revenue Chart */}
+          <div className="bg-white rounded-2xl border-2 border-orange-100 p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-bold text-slate-900">Revenue Trend</h3>
+              <TrendingUp className="w-5 h-5 text-green-600" />
+            </div>
+            <div className="space-y-4">
+              {['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'].map((month, index) => {
+                const value = 40 + Math.random() * 50;
+                return (
+                  <div key={month}>
+                    <div className="flex items-center justify-between text-sm mb-2">
+                      <span className="text-slate-600">{month}</span>
+                      <span className="font-bold text-slate-900">SAR {(value * 20).toFixed(0)}K</span>
+                    </div>
+                    <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-gradient-to-r from-orange-500 to-amber-600"
+                        style={{ width: `${value}%` }}
+                      />
+                    </div>
                   </div>
-                )}
-              </div>
+                );
+              })}
             </div>
           </div>
 
-          {selectedProjectForReport ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {reportTypes.map((report) => (
-                <ReportCard key={report.id} report={report} />
-              ))}
-            </div>
-          ) : (
-            <div className="bg-white rounded-2xl p-12 border border-slate-200 text-center shadow-sm">
-              <FileText className="w-16 h-16 text-slate-300 mx-auto mb-4" />
-              <h3 className="text-lg font-semibold text-slate-900 mb-2">Select a Project</h3>
-              <p className="text-sm text-slate-600 max-w-md mx-auto">
-                Choose a project from the dropdown above to view available reports and download options
-              </p>
-            </div>
-          )}
-
-          {selectedProjectForReport && (
-            <div className="bg-gradient-to-br from-blue-50 to-orange-50 rounded-2xl p-6 border border-orange-200">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-white rounded-xl shadow-md">
-                    <TrendingUp className="w-6 h-6 text-blue-600" />
+          {/* Budget Distribution */}
+          <div className="bg-white rounded-2xl border-2 border-orange-100 p-6">
+            <h3 className="text-lg font-bold text-slate-900 mb-6">Budget Distribution</h3>
+            <div className="space-y-6">
+              {financialData.map((item, index) => (
+                <div key={index}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-slate-700 font-medium">{item.category}</span>
+                    <span className="text-slate-900 font-bold">SAR {(item.amount / 1000000).toFixed(1)}M</span>
                   </div>
-                  <div>
-                    <h3 className="font-bold text-slate-900">Need All Reports?</h3>
-                    <p className="text-sm text-slate-600">Download the comprehensive report package</p>
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 h-3 bg-gray-200 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-gradient-to-r from-orange-500 to-amber-600"
+                        style={{ width: `${item.percentage}%` }}
+                      />
+                    </div>
+                    <span className="text-sm font-semibold text-slate-600 w-12">{item.percentage}%</span>
                   </div>
                 </div>
-                <button
-                  onClick={() => handleDownload('all')}
-                  disabled={generatingReport === 'all'}
-                  className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:shadow-lg hover:shadow-blue-500/30 transition-all duration-300 hover:scale-105 font-medium"
-                >
-                  {generatingReport === 'all' ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      Generating...
-                    </>
-                  ) : (
-                    <>
-                      <Download className="w-5 h-5" />
-                      Download All Reports
-                    </>
-                  )}
-                </button>
+              ))}
+            </div>
+            <div className="mt-6 pt-6 border-t border-orange-100">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-700 font-bold">Total Budget</span>
+                <span className="text-xl font-bold text-slate-900">SAR 12.5M</span>
               </div>
             </div>
-          )}
+          </div>
+        </div>
+
+        {/* Project Performance Table */}
+        <div className="bg-white rounded-2xl border-2 border-orange-100 p-6">
+          <h3 className="text-lg font-bold text-slate-900 mb-6">Project Performance</h3>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b-2 border-orange-100">
+                  <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Project</th>
+                  <th className="text-center py-3 px-4 text-sm font-semibold text-slate-700">Progress</th>
+                  <th className="text-center py-3 px-4 text-sm font-semibold text-slate-700">Budget Used</th>
+                  <th className="text-center py-3 px-4 text-sm font-semibold text-slate-700">Timeline</th>
+                  <th className="text-center py-3 px-4 text-sm font-semibold text-slate-700">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {projectPerformance.map((project, index) => (
+                  <tr key={index} className="border-b border-orange-50 hover:bg-orange-50/50 transition-all">
+                    <td className="py-4 px-4">
+                      <div className="font-medium text-slate-900">{project.project}</div>
+                    </td>
+                    <td className="py-4 px-4">
+                      <div className="flex items-center justify-center gap-2">
+                        <div className="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
+                          <div 
+                            className="h-full bg-gradient-to-r from-orange-500 to-amber-600"
+                            style={{ width: `${project.progress}%` }}
+                          />
+                        </div>
+                        <span className="text-sm font-semibold text-slate-700">{project.progress}%</span>
+                      </div>
+                    </td>
+                    <td className="py-4 px-4 text-center">
+                      <span className="text-sm font-semibold text-slate-700">{project.budget}%</span>
+                    </td>
+                    <td className="py-4 px-4 text-center">
+                      <span className="text-sm text-slate-600">{project.timeline}</span>
+                    </td>
+                    <td className="py-4 px-4">
+                      <div className="flex justify-center">
+                        <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${getStatusColor(project.status)}`}>
+                          {project.status === 'excellent' ? 'Excellent' : project.status === 'good' ? 'Good' : 'Warning'}
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Key Metrics */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-8">
+          <div className="bg-white rounded-2xl border-2 border-orange-100 p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-3 rounded-xl bg-green-100">
+                <CheckCircle2 className="w-6 h-6 text-green-600" />
+              </div>
+              <h4 className="font-semibold text-slate-900">On-Time Delivery</h4>
+            </div>
+            <div className="text-3xl font-bold text-slate-900 mb-2">92%</div>
+            <p className="text-sm text-slate-600">Projects completed on schedule</p>
+          </div>
+
+          <div className="bg-white rounded-2xl border-2 border-orange-100 p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-3 rounded-xl bg-blue-100">
+                <Clock className="w-6 h-6 text-blue-600" />
+              </div>
+              <h4 className="font-semibold text-slate-900">Avg Response Time</h4>
+            </div>
+            <div className="text-3xl font-bold text-slate-900 mb-2">6h</div>
+            <p className="text-sm text-slate-600">Client inquiry response time</p>
+          </div>
+
+          <div className="bg-white rounded-2xl border-2 border-orange-100 p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-3 rounded-xl bg-yellow-100">
+                <AlertTriangle className="w-6 h-6 text-yellow-600" />
+              </div>
+              <h4 className="font-semibold text-slate-900">Change Orders</h4>
+            </div>
+            <div className="text-3xl font-bold text-slate-900 mb-2">3</div>
+            <p className="text-sm text-slate-600">Active change requests</p>
+          </div>
         </div>
       </main>
     </div>

@@ -19,12 +19,13 @@ import Project from "./pages/Project.jsx";
 import Recommendations from "./pages/Recommendations.jsx";
 import Messages from "./pages/Messages.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
+import MyRequests from "./pages/MyRequests.jsx";
 import Login from "./pages/auth/Login.jsx";
 import Register from "./pages/auth/Register.jsx";
 
 // Provider pages
 import ProviderDashboard from "./provider/pages/ProviderDashboard.jsx";
-import ProviderDashboards from "./provider/pages/ProviderDashboards.jsx";
+import ProviderProjects from "./provider/pages/ProviderProjects.jsx";
 import ProviderRequests from "./provider/pages/ProviderRequests.jsx";
 import ProviderMessages from "./provider/pages/ProviderMessages.jsx";
 import ProviderReports from "./provider/pages/ProviderReports.jsx";
@@ -32,13 +33,13 @@ import ProviderProfile from "./provider/pages/ProviderProfile.jsx";
 
 import { loadLS, saveLS, uid } from "./lib/utils.js";
 import { seedUsers } from "./lib/auth.js";
+import { supabase } from "./lib/supabase";
 
 // ---- Guards ---------------------------------------------------------------
 
 const RequireProject = ({ project, children }) =>
   project ? children : <Navigate to="/project" replace />;
 
-// If you want to later protect owner routes too, you can expand this.
 const RequireAuth = ({ children }) => children;
 
 const RequireRole = ({ role, children, auth }) => {
@@ -64,18 +65,67 @@ export default function App() {
   // Project flow state
   const [project, setProject] = useState(null);
 
-  // Auth state
-  const [users, setUsers] = useState(() => loadLS("rawasi_users", seedUsers()));
+  // Auth state - load from localStorage on mount
   const [auth, setAuth] = useState(() => loadLS("rawasi_auth", null));
+  
+  // Keep old users state for backward compatibility (registration)
+  const [users, setUsers] = useState(() => loadLS("rawasi_users", seedUsers()));
+  
   const [otpModal, setOtpModal] = useState({ open: false, email: "" });
   const [forgotModal, setForgotModal] = useState({ open: false });
 
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Persist users & auth
-  useEffect(() => saveLS("rawasi_users", users), [users]);
+  // Persist auth state
   useEffect(() => saveLS("rawasi_auth", auth), [auth]);
+  useEffect(() => saveLS("rawasi_users", users), [users]);
+
+  // Check for existing Supabase session on mount
+  useEffect(() => {
+    checkSupabaseSession();
+  }, []);
+
+  // Function to check if user is already logged in via Supabase
+  const checkSupabaseSession = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (session?.user && !auth) {
+        // User has active Supabase session but no app auth state
+        console.log("Restoring session for:", session.user.email);
+        
+        // Get profile to determine role
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("*")
+          .eq("id", session.user.id)
+          .single();
+
+        const userRole = profile?.role || session.user.user_metadata?.role || "owner";
+
+        const authData = {
+          id: session.user.id,
+          email: session.user.email,
+          role: userRole,
+          name: profile?.name || profile?.full_name || session.user.user_metadata?.full_name || session.user.email.split('@')[0],
+          phone: profile?.phone || session.user.user_metadata?.phone || "",
+        };
+
+        setAuth(authData);
+        localStorage.setItem("rawasi_auth", JSON.stringify(authData));
+      }
+    } catch (error) {
+      console.error("Session check error:", error);
+    }
+  };
+
+  // Request notification permission on app load
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }, []);
 
   // Show progress only on flow routes (not on Landing or Dashboard)
   const showFlowProgress = ["/project", "/recs", "/messages"].some((p) =>
@@ -109,39 +159,60 @@ export default function App() {
   }
 
   function handleLogin({ email, password }) {
+    // This is now just for setting app state
+    // Actual authentication happens in Login.jsx via Supabase
+    
+    // Get auth data from localStorage (set by Login.jsx)
+    const authData = JSON.parse(localStorage.getItem("rawasi_auth") || "null");
+    
+    if (authData) {
+      console.log("Setting auth state:", authData);
+      setAuth(authData);
+      return { ok: true };
+    }
+
+    // Fallback: check old localStorage users for backward compatibility
     const user = users.find(
       (u) =>
         u.email.toLowerCase() === email.toLowerCase() &&
         u.password === password
     );
-    if (!user) return { ok: false, error: "Invalid credentials" };
-
-    const authData = {
-      id: user.id,
-      name: user.name,
-      role: user.role, // "owner" or "provider"
-      email: user.email,
-      phone: user.phone,
-    };
-
-    setAuth(authData);
-
-    // Redirect based on role
-    if (authData.role === "provider") {
-      navigate("/provider/dashboard");
-    } else {
-      // Default: project owner
-      navigate("/project");
+    
+    if (user) {
+      const legacyAuthData = {
+        id: user.id,
+        name: user.name,
+        role: user.role,
+        email: user.email,
+        phone: user.phone,
+      };
+      
+      setAuth(legacyAuthData);
+      
+      if (legacyAuthData.role === "provider") {
+        navigate("/provider/dashboard");
+      } else {
+        navigate("/project");
+      }
+      
+      return { ok: true };
     }
 
-    return { ok: true };
+    return { ok: false, error: "Invalid credentials" };
   }
 
-  function logout() {
+  async function logout() {
+    // Sign out from Supabase
+    await supabase.auth.signOut();
+    
+    // Clear app state
     setAuth(null);
-    // You can also send them to "/" if you prefer:
-    // navigate("/");
-    navigate("/project");
+    localStorage.removeItem("rawasi_auth");
+    localStorage.removeItem("user");
+    localStorage.removeItem("profile");
+    
+    // Redirect to landing
+    navigate("/");
   }
 
   // ---- Render -------------------------------------------------------------
@@ -209,6 +280,14 @@ export default function App() {
               />
             }
           />
+          <Route
+            path="/my-requests"
+            element={
+              <RequireAuth>
+                <MyRequests />
+              </RequireAuth>
+            }
+          />
 
           {/* Provider Portal */}
           <Route
@@ -220,10 +299,10 @@ export default function App() {
             }
           />
           <Route
-            path="/provider/dashboards"
+            path="/provider/projects"
             element={
               <RequireRole role="provider" auth={auth}>
-                <ProviderDashboards />
+                <ProviderProjects />
               </RequireRole>
             }
           />

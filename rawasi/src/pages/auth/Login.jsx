@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LogIn,
@@ -11,6 +12,7 @@ import {
 import { supabase } from "../../lib/supabase";
 
 export default function Login({ onSubmit, onForgot }) {
+  const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [err, setErr] = useState("");
@@ -36,58 +38,89 @@ export default function Login({ onSubmit, onForgot }) {
     }
 
     try {
-      // 1) Sign in with Supabase
+      // Sign in with Supabase
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: email,
+        email: email.trim(),
         password: password,
       });
 
-      if (error) throw error;
+      if (error) {
+        console.error("Supabase auth error:", error);
+        throw error;
+      }
 
-      // 2) Get user profile (optional)
+      if (!data.user) {
+        throw new Error("No user data returned");
+      }
+
+      console.log("✅ Login successful:", data.user.email);
+
+      // Get user profile to determine role
       const { data: profile, error: profileError } = await supabase
         .from("profiles")
         .select("*")
         .eq("id", data.user.id)
         .single();
 
-      if (profileError && profileError.code !== "PGRST116") {
+      if (profileError) {
         console.error("Profile fetch error:", profileError);
+        // Even if profile fetch fails, we can still log in
       }
 
-      // 3) Store in localStorage (your existing behavior)
+      // Determine role from profile or metadata
+      let userRole = "owner"; // default
+      
+      if (profile?.role) {
+        userRole = profile.role;
+      } else if (data.user.user_metadata?.role) {
+        userRole = data.user.user_metadata.role;
+      }
+
+      console.log("User role:", userRole);
+
+      // Store in localStorage for app state
+      const authData = {
+        id: data.user.id,
+        email: data.user.email,
+        role: userRole,
+        name: profile?.full_name || data.user.user_metadata?.full_name || email.split('@')[0],
+        phone: profile?.phone || data.user.user_metadata?.phone || "",
+      };
+
+      localStorage.setItem("rawasi_auth", JSON.stringify(authData));
       localStorage.setItem("user", JSON.stringify(data.user));
-      localStorage.setItem("profile", JSON.stringify(profile));
-
-      // 4) ALSO log in via App.jsx so role-based routing works
-      if (onSubmit) {
-        const result = await onSubmit({ email, password });
-
-        if (!result?.ok) {
-          setErr(result.error || "Invalid email or password");
-          return;
-        }
+      if (profile) {
+        localStorage.setItem("profile", JSON.stringify(profile));
       }
 
-      // Do NOT redirect here; App.jsx already navigates based on role
-      // (handleLogin in App.jsx calls navigate("/provider/dashboard") or "/project")
+      // Call parent onSubmit if provided (for App.jsx state sync)
+      if (onSubmit) {
+        await onSubmit({ email, password });
+      }
+
+      // Navigate based on role
+      if (userRole === "provider") {
+        console.log("Navigating to provider dashboard...");
+        navigate("/provider/dashboard");
+      } else {
+        console.log("Navigating to project page...");
+        navigate("/project");
+      }
+
     } catch (error) {
       console.error("Login error:", error);
-      setErr(error.message || "Invalid email or password");
+      
+      // User-friendly error messages
+      if (error.message?.includes("Invalid login credentials")) {
+        setErr("Invalid email or password. Please check your credentials.");
+      } else if (error.message?.includes("Email not confirmed")) {
+        setErr("Please verify your email address before logging in.");
+      } else {
+        setErr(error.message || "Login failed. Please try again.");
+      }
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const handleDemoFill = (userType) => {
-    if (userType === "owner") {
-      setEmail("owner@demo.app");
-      setPassword("owner123");
-    } else {
-      setEmail("provider@demo.app");
-      setPassword("provider123");
-    }
-    setErr("");
   };
 
   const handleKeyPress = (e) => {
@@ -145,10 +178,11 @@ export default function Login({ onSubmit, onForgot }) {
                   <input
                     type="email"
                     className="w-full rounded-xl border border-slate-300 bg-white py-3 pl-11 pr-4 outline-none transition-all focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20"
-                    placeholder="rawasi@example.com"
+                    placeholder="your@email.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     onKeyPress={handleKeyPress}
+                    autoComplete="email"
                   />
                 </div>
               </div>
@@ -176,6 +210,7 @@ export default function Login({ onSubmit, onForgot }) {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     onKeyPress={handleKeyPress}
+                    autoComplete="current-password"
                   />
                   <button
                     type="button"
@@ -258,6 +293,22 @@ export default function Login({ onSubmit, onForgot }) {
           >
             Create one
           </a>
+        </motion.div>
+
+        {/* Demo Credentials Helper (Remove in production) */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.5 }}
+          className="mt-4 text-center"
+        >
+          <details className="text-sm text-slate-500">
+            <summary className="cursor-pointer hover:text-orange-600">Test Accounts</summary>
+            <div className="mt-2 space-y-1">
+              <p className="font-mono">Provider: a.alsudais@alfanar.com</p>
+              <p className="font-mono text-xs">Check Supabase for password</p>
+            </div>
+          </details>
         </motion.div>
       </motion.div>
     </main>
