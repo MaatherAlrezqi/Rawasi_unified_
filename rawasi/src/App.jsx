@@ -20,6 +20,7 @@ import Recommendations from "./pages/Recommendations.jsx";
 import Messages from "./pages/Messages.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import MyRequests from "./pages/MyRequests.jsx";
+import OwnerRequests from "./pages/OwnerRequests.jsx";
 import Login from "./pages/auth/Login.jsx";
 import Register from "./pages/auth/Register.jsx";
 
@@ -285,6 +286,14 @@ export default function App() {
             element={
               <RequireAuth>
                 <MyRequests />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/owner-requests"
+            element={
+              <RequireAuth>
+                <OwnerRequests />
               </RequireAuth>
             }
           />

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { LogOut, User, Settings } from "lucide-react";
+import { LogOut, User, Settings, FolderOpen } from "lucide-react";
 import rawasiLogo from "../assets/photo_2025-08-13_21-03-51.png";
 import { useLang } from "../context/lang";
 import { supabase } from "../lib/supabase";
@@ -25,6 +25,7 @@ export default function Header() {
           register: "إنشاء حساب",
           profile: "الملف الشخصي",
           settings: "الإعدادات",
+          myRequests: "طلباتي",
           logout: "تسجيل الخروج",
         }
       : {
@@ -32,10 +33,12 @@ export default function Header() {
           why: "Why Rawasi",
           how: "How it works",
           dash: "Dashboard",
+          Mess: "Messages",
           login: "Login",
           register: "Create account",
           profile: "Profile",
           settings: "Settings",
+          myRequests: "My Requests",
           logout: "Logout",
         };
 
@@ -144,6 +147,16 @@ export default function Header() {
           >
             {L.dash}
           </Link>
+          <Link
+            className={`hover:text-orange-600 transition-colors ${
+              pathname.startsWith("/Messages")
+                ? "text-orange-600 font-medium"
+                : "text-slate-700"
+            }`}
+            to="/Messages"
+          >
+            {L.Mess}
+          </Link>
         </nav>
 
         {/* Auth & Language */}
@@ -224,6 +237,17 @@ export default function Header() {
                     >
                       <Settings className="h-4 w-4" />
                       {L.settings}
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setShowDropdown(false);
+                        navigate("/owner-requests");
+                      }}
+                      className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-orange-50 hover:text-orange-700 transition-colors"
+                    >
+                      <FolderOpen className="h-4 w-4" />
+                      {L.myRequests}
                     </button>
                   </div>
 

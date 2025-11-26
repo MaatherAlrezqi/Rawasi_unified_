@@ -1,8 +1,7 @@
-// src/pages/Recommendations.jsx
+// C:\Users\aisha\Downloads\Rawasi\rawasi\src\pages\Recommendations.jsx
 import React, { useMemo, useState, useEffect } from "react";
+import { navigateToChat } from "../lib/chatHelpers";
 import { motion, AnimatePresence } from "framer-motion";
-import { requestService } from "../services/requestService";
-import { saveDraftProject } from "../services/projectService";
 import {
   MapPin,
   Star,
@@ -10,6 +9,7 @@ import {
   X,
   Award,
   Loader2,
+  Filter,
   ChevronDown,
   Sparkles,
   Users,
@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import { Section } from "../components/ui.jsx";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "../lib/supabaseClient";
+import { supabase } from "../lib/supabase"; // ⬅️ NEW
 
 export default function Recommendations({
   project,
@@ -31,329 +31,289 @@ export default function Recommendations({
 }) {
   const navigate = useNavigate();
 
-  const [savedProject, setSavedProject] = useState(null);
-  const [recommendations, setRecommendations] = useState([]);
-  const [llmInsights, setLlmInsights] = useState(null);
-  const [projectComplexity, setProjectComplexity] = useState(null);
-
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  const [query, setQuery] = useState("");
-  const [techFilter, setTechFilter] = useState("All Technologies");
-  const [requestingId, setRequestingId] = useState(null);
-  const [requested, setRequested] = useState(new Set());
-  const [autoProjectId, setAutoProjectId] = useState(null);
-
   const t = {
     title: "AI Recommendations",
     subtitle: "LLM-powered matches based on your project requirements",
+    loading: "Analyzing your project with AI and finding the best providers...",
     loadingLLM: "Our AI is analyzing your project requirements...",
     topPicks: "Top Picks",
     allProviders: "All Providers",
     search: "Search providers...",
     all: "All Technologies",
+    estCost: "Est. cost",
     score: "Match Score",
+    experience: "Experience",
     compare: "Compare",
     aiReason: "Why recommended",
     request: "Send request",
     message: "Message",
     sending: "Sending...",
     sent: "Sent",
+    filters: "Filters",
     showing: "Showing",
     of: "of",
     providers: "providers",
     complexity: "Project Complexity",
   };
 
-  // -------- Load recommendations (from project.recommendations or API) --------
+  const [recommendations, setRecommendations] = useState([]);
+  const [llmInsights, setLlmInsights] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [query, setQuery] = useState("");
+  const [techFilter, setTechFilter] = useState(t.all);
+  const [requestingId, setRequestingId] = useState(null);
+  const [requested, setRequested] = useState(new Set());
+  const [showFilters, setShowFilters] = useState(false);
+  const [projectComplexity, setProjectComplexity] = useState(null);
+
+  // NEW: current user info (owner)
+  const [currentUserId, setCurrentUserId] = useState(null);
+  const [currentUserEmail, setCurrentUserEmail] = useState(null);
+
+  // Load current user session
   useEffect(() => {
-    const load = async () => {
+    const loadUser = async () => {
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (error) throw error;
+        const session = data?.session;
+        if (session?.user) {
+          setCurrentUserId(session.user.id);
+          setCurrentUserEmail(session.user.email);
+        }
+      } catch (err) {
+        console.error("❌ Error loading user session:", err);
+      }
+    };
+    loadUser();
+  }, []);
+
+  // Load recommendations from project or API
+  useEffect(() => {
+    const loadRecommendations = async () => {
       if (!project) return;
 
       setIsLoading(true);
       setError(null);
 
       try {
-        // 0) Ensure we have a project row
-        let workingProject = project;
-        if (!project.id && !project.projectId) {
-          const inserted = await saveDraftProject(project); // writes to public.projects
-          workingProject = { ...project, id: inserted.id };
-          setSavedProject(inserted);
-        } else {
-          setSavedProject(project);
-        }
-
-        // 1) If recs embedded in project, use them
+        // if project already has recommendations
         if (
-          workingProject.recommendations?.success &&
-          workingProject.recommendations?.suppliers
+          project.recommendations?.success &&
+          project.recommendations?.suppliers
         ) {
-          const recs = workingProject.recommendations;
-          const tx = recs.suppliers.map((s, i) => ({
-            id: `llm_${i}`,
-            providerId: s.provider_id ?? null,
-            name: s.name,
-            locationEn: s.region,
-            technologies: Array.isArray(s.technology)
-              ? s.technology
-              : s.technology
-              ? [s.technology]
-              : [],
-            rating: s.rating,
-            matchScore: s.match_score,
-            matchReasons: s.match_reasons || [],
-            contact: s.contact,
-            email: s.email,
-            phone: s.phone,
-            aiReason:
-              (s.match_reasons || []).join(". ") ||
-              "Matches your project requirements",
-            matched_technology: s.matched_technology,
-            finalScore: (s.match_score || 0) / 100,
-          }));
+          console.log("✅ Using existing recommendations from project");
+          const recs = project.recommendations;
 
-          setRecommendations(tx);
+          const transformedSuppliers = recs.suppliers.map(
+            (supplier, index) => ({
+              id: `llm_${index}`,
+              name: supplier.name,
+              locationEn: supplier.region,
+              technologies: Array.isArray(supplier.technology)
+                ? supplier.technology
+                : [supplier.technology],
+              rating: supplier.rating,
+              matchScore: supplier.match_score,
+              matchReasons: supplier.match_reasons || [],
+              contact: supplier.contact,
+              email: supplier.email,
+              phone: supplier.phone,
+              aiReason:
+                supplier.match_reasons?.join(". ") ||
+                "Matches your project requirements",
+              baseCost: 100000,
+              costPerSqm: 4000,
+              matched_technology: supplier.matched_technology,
+              finalScore: supplier.match_score / 100,
+            })
+          );
+
+          setRecommendations(transformedSuppliers);
           setLlmInsights(recs.ai_insights);
           setProjectComplexity(recs.project_complexity);
           setIsLoading(false);
           return;
         }
 
-        // 2) Otherwise call recommendation API
+        console.log("🔍 Fetching recommendations from API...");
         const API_URL =
           import.meta.env.VITE_RECOMMENDATION_API_URL ||
-          "http://localhost:5001/api";
+          "http://localhost:5000/api";
 
-        const payload = {
-          name: workingProject.name,
-          type: workingProject.type,
-          location: workingProject.location,
-          sizeSqm: workingProject.sizeSqm || workingProject.size_sqm,
-          budget: workingProject.budget,
-          timelineMonths:
-            workingProject.timelineMonths || workingProject.timeline_months,
-          Nfloors: workingProject.Nfloors || workingProject.n_floors,
-          techNeeds:
-            workingProject.techNeeds || workingProject.tech_needs || [],
+        const recommendationData = {
+          name: project.name,
+          type: project.type,
+          location: project.location,
+          sizeSqm: project.sizeSqm || project.size_sqm,
+          budget: project.budget,
+          timelineMonths: project.timelineMonths || project.timeline_months,
+          Nfloors: project.Nfloors || project.n_floors,
+          techNeeds: project.techNeeds || project.tech_needs || [],
         };
 
-        const res = await fetch(`${API_URL}/recommend`, {
+        const response = await fetch(`${API_URL}/recommend`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+          body: JSON.stringify(recommendationData),
         });
 
-        if (!res.ok)
-          throw new Error(`API ${API_URL}/recommend returned ${res.status}`);
+        if (!response.ok) throw new Error(`API returned ${response.status}`);
 
-        const data = await res.json();
-        if (!data.success)
+        const data = await response.json();
+        if (!data.success) {
           throw new Error(data.message || "No recommendations found");
+        }
 
-        const tx = data.suppliers.map((s, i) => ({
-          id: `llm_${i}`,
-          providerId: s.provider_id ?? null,
-          name: s.name,
-          locationEn: s.region,
-          technologies: Array.isArray(s.technology)
-            ? s.technology
-            : s.technology
-            ? [s.technology]
-            : [],
-          rating: s.rating,
-          matchScore: s.match_score,
-          matchReasons: s.match_reasons || [],
-          contact: s.contact,
-          email: s.email,
-          phone: s.phone,
+        console.log("✅ Recommendations received from API:", data);
+
+        const transformedSuppliers = data.suppliers.map((supplier, index) => ({
+          id: `llm_${index}`,
+          name: supplier.name,
+          locationEn: supplier.region,
+          technologies: Array.isArray(supplier.technology)
+            ? supplier.technology
+            : [supplier.technology],
+          rating: supplier.rating,
+          matchScore: supplier.match_score,
+          matchReasons: supplier.match_reasons || [],
+          contact: supplier.contact,
+          email: supplier.email,
+          phone: supplier.phone,
           aiReason:
-            (s.match_reasons || []).join(". ") ||
+            supplier.match_reasons?.join(". ") ||
             "Matches your project requirements",
-          matched_technology: s.matched_technology,
-          finalScore: (s.match_score || 0) / 100,
+          baseCost: 100000,
+          costPerSqm: 4000,
+          matched_technology: supplier.matched_technology,
+          finalScore: supplier.match_score / 100,
         }));
 
-        setRecommendations(tx);
+        setRecommendations(transformedSuppliers);
         setLlmInsights(data.ai_insights);
         setProjectComplexity(data.project_complexity);
-      } catch (e) {
-        console.error(e);
-        setError(e.message);
+      } catch (err) {
+        console.error("❌ Error loading recommendations:", err);
+        setError(err.message);
         setRecommendations([]);
       } finally {
         setIsLoading(false);
       }
     };
 
-    load();
+    loadRecommendations();
   }, [project]);
 
-  // --------- Filters / memo ---------
+  // Tech options
   const techOptions = useMemo(() => {
-    const s = new Set([t.all]);
+    const set = new Set([t.all]);
     recommendations.forEach((p) =>
-      (p.technologies || []).forEach((x) => s.add(x))
+      p.technologies?.forEach((tech) => set.add(tech))
     );
-    return Array.from(s);
-  }, [recommendations]);
+    return Array.from(set);
+  }, [recommendations, t.all]);
 
-  const filteredProviders = useMemo(
-    () =>
-      recommendations.filter((p) => {
-        const techOk =
-          techFilter === t.all ||
-          (p.technologies || []).includes(techFilter);
-        const nameOk = String(p.name)
-          .toLowerCase()
-          .includes(query.toLowerCase());
-        return techOk && nameOk;
-      }),
-    [recommendations, query, techFilter]
-  );
+  // Filtered providers
+  const filteredProviders = useMemo(() => {
+    return recommendations.filter((p) => {
+      const techOk =
+        techFilter === t.all || p.technologies?.includes(techFilter);
+      const nameOk = String(p.name).toLowerCase().includes(query.toLowerCase());
+      return techOk && nameOk;
+    });
+  }, [recommendations, query, techFilter, t.all]);
 
   const topPicks = recommendations.slice(0, 3);
 
-  // --------- Ensure project exists (for users who jump straight to recs) ---------
-  async function ensureProjectId(projectArg, setId) {
-    const existing = projectArg?.id ?? projectArg?.projectId ?? null;
-    if (existing) return existing;
-
-    const {
-      data: { user },
-      error: userErr,
-    } = await supabase.auth.getUser();
-    if (userErr || !user)
-      throw new Error("Please log in before sending a request.");
-
-    const payload = {
-      user_id: user.id,
-      title:
-        projectArg?.name ||
-        projectArg?.basic?.projectName ||
-        "Untitled project",
-      type: projectArg?.type || "Residential",
-      location: projectArg?.location || "Unknown",
-      size_sqm: projectArg?.sizeSqm ?? projectArg?.size_sqm ?? null,
-      budget: projectArg?.budget ?? null,
-      timeline_months:
-        projectArg?.timelineMonths ?? projectArg?.timeline_months ?? null,
-    };
-
-    const { data, error } = await supabase
-      .from("projects")
-      .insert([payload])
-      .select()
-      .single();
-    if (error) throw error;
-
-    setId?.(data.id);
-    return data.id;
+  // -------------- REAL REQUEST HANDLER (owner → provider) --------------
+const handleRequest = async (provider) => {
+  if (!currentUserId) {
+    alert("Please login first to send a request.");
+    return;
+  }
+  if (!project?.id) {
+    alert("Missing project id. Please save your project first.");
+    return;
   }
 
-const handleRequest = async (provider) => {
   try {
+    setRequestingId(provider.id);
     setError(null);
 
-    const pidKey = provider.providerId || provider.id;
-    setRequestingId(pidKey);
+    // 1) نجيب الـ provider من جدول providers عن طريق الإيميل
+    const { data: providerRow, error: providerError } = await supabase
+      .from("provider")
+      .select("provider_id")
+      .eq("email", provider.email)
+      .maybeSingle();
 
-    // 1) Ensure user is logged in
-    const { data: { user }, error: uErr } = await supabase.auth.getUser();
-    if (uErr || !user) {
-      throw new Error("Please log in as a project owner to send requests.");
+    if (providerError) throw providerError;
+    if (!providerRow) {
+      throw new Error(
+        "Provider not found in 'providers' table for email: " + provider.email
+      );
     }
 
-    // 2) Ensure projectId exists
-    const projectId = 
-      savedProject?.id ||
-      project?.id ||
-      project?.projectId ||
-      (await ensureProjectId(project, (id) => setAutoProjectId(id)));
+    const providerId = providerRow.provider_id; // هذا اللي بنحطه في project_requests
 
-    // 3) Find directory provider ID
-    let directoryProviderId = provider.providerId ?? null;
+    const area =
+      Number(project?.sizeSqm || project?.size_sqm) > 0
+        ? Number(project.sizeSqm || project.size_sqm)
+        : null;
 
-    if (!directoryProviderId) {
-      let row = null;
+    // 2) insert into project_requests
+    const { data, error: insertError } = await supabase
+      .from("project_requests")
+      .insert({
+        project_id: project.id,
+        user_id: currentUserId,      // صاحب المشروع (auth.users.id)
+        provider_id: providerId,     // من جدول providers
+        status: "pending",
 
-      // 3a) Try match by email first
-      const email = (provider.email || provider.Email || "").trim();
-      if (email) {
-        const { data, error } = await supabase
-          .from("provider")
-          .select("provider_id")
-          .ilike("email", email)
-          .maybeSingle();
-        if (!error) row = data;
-      }
+        // معلومات إضافية اختيارية
+        title: project.name || "Project request",
+        client_name: currentUserEmail, // ممكن لاحقًا تغيّرينها لاسم من profiles.name
+        location: project.location || provider.locationEn,
+        budget: project.budget || null,
+        project_type: project.type || null,
+        description:
+          llmInsights?.summary ||
+          `Request to ${provider.name} for project ${project.name || ""}`,
+        timeline: project.timelineMonths
+          ? `${project.timelineMonths} months`
+          : project.timeline_months
+          ? `${project.timeline_months} months`
+          : null,
+        size: area ? `${area} sqm` : null,
+        floors:
+          project.Nfloors || project.n_floors
+            ? String(project.Nfloors || project.n_floors)
+            : null,
+        requirements:
+          provider.matchReasons && provider.matchReasons.length > 0
+            ? provider.matchReasons
+            : null,
+      })
+      .select()
+      .single();
 
-      // 3b) If not found → try match by company_name
-      if (!row) {
-        const name = provider.name || provider.Factory_Name || provider.company_name || "";
-        const cleanName = String(name).trim();
+    if (insertError) throw insertError;
 
-        const { data, error } = await supabase
-          .from("provider")
-          .select("provider_id")
-          .ilike("company_name", `%${cleanName}%`)
-          .maybeSingle();
+    console.log("✅ Project request inserted:", data);
 
-        if (!error) row = data;
-      }
-
-      // Still not found
-      if (!row?.provider_id) {
-        throw new Error("This provider isn't in the directory yet. Choose a listed provider.");
-      }
-
-      directoryProviderId = row.provider_id;
-    }
-
-    // 4) Check if request already exists
-    const exists = await requestService.requestExists(
-      projectId,
-      null,  // providerUserId - not applicable for directory providers
-      user.id,  // projectOwnerId
-      directoryProviderId
-    );
-
-    if (exists) {
-      setRequested((prev) => new Set(prev).add(pidKey));
-      return;
-    }
-
-    // 5) Create new request
-    await requestService.createRequest({
-      projectId,
-      projectOwnerId: user.id,
-      directoryProviderId,
-      projectTitle:
-        project?.basic?.projectName || project?.name || "Untitled project",
-      projectDescription:
-        project?.scope?.description || project?.description || "",
-      budget: project?.budget ?? null,
-      timeline:
-        project?.timeline ??
-        project?.timelineMonths ??
-        project?.timeline_months ??
-        null,
-      message: "New request from Rawasi.",
-    });
-
-    setRequested((prev) => new Set(prev).add(pidKey));
-
+    // 3) نحدّث الواجهة إن الطلب تم إرساله
+    setRequested((prev) => new Set([...prev, provider.id]));
   } catch (err) {
-    console.error("Request error:", err);
-    setError(err.message || "Failed to send request.");
+    console.error("❌ Error sending request:", err);
+    setError(err.message || "Failed to send request");
+    alert("Failed to send request: " + err.message);
   } finally {
     setRequestingId(null);
   }
 };
 
-
-  // ----------------------------- UI states -----------------------------
+  // ----------------------- Loading / Error / Empty -----------------------
   if (isLoading) {
     return (
       <Section className="bg-gradient-to-br from-slate-50 to-blue-50 min-h-screen">
@@ -404,16 +364,14 @@ const handleRequest = async (provider) => {
             animate={{ opacity: 1, y: 0 }}
             className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center"
           >
-            <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-red-100">
-              <X className="h-8 w-8 text-red-600" />
-            </div>
-            <h2 className="mb-2 text-xl font-bold text-slate-900">
-              Unable to Load Recommendations
+            <X className="h-12 w-12 text-red-600 mx-auto mb-4" />
+            <h2 className="text-xl font-bold text-red-900 mb-2">
+              Something went wrong
             </h2>
-            <p className="mb-6 text-slate-700">{error}</p>
+            <p className="text-red-700 mb-6">{error}</p>
             <button
               onClick={() => window.location.reload()}
-              className="rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 px-6 py-3 font-medium text-white shadow-sm transition-all hover:from-amber-600 hover:to-amber-700 hover:shadow-md"
+              className="px-6 py-3 bg-red-600 text-white rounded-xl font-medium hover:bg-red-700 transition-colors"
             >
               Try Again
             </button>
@@ -423,30 +381,28 @@ const handleRequest = async (provider) => {
     );
   }
 
-  if (!recommendations || recommendations.length === 0) {
+  if (recommendations.length === 0) {
     return (
       <Section className="bg-gradient-to-br from-slate-50 to-blue-50 min-h-screen">
         <div className="mx-auto max-w-3xl px-4 py-12">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="rounded-2xl border border-slate-300 bg-white p-8 text-center"
+            className="rounded-2xl border border-amber-200 bg-amber-50 p-8 text-center"
           >
-            <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-slate-100">
-              <Users className="h-8 w-8 text-slate-600" />
-            </div>
-            <h2 className="mb-2 text-xl font-bold text-slate-900">
-              No Providers Found
+            <Search className="h-12 w-12 text-amber-600 mx-auto mb-4" />
+            <h2 className="text-xl font-bold text-amber-900 mb-2">
+              No Matching Providers Found
             </h2>
-            <p className="mb-6 text-slate-700">
-              We couldn't find any providers matching your project requirements.
-              Try adjusting your project details or check back later.
+            <p className="text-amber-700 mb-6">
+              We couldn't find providers matching your specific requirements.
+              Try adjusting your project criteria.
             </p>
             <button
               onClick={() => navigate("/project")}
-              className="rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 px-6 py-3 font-medium text-white shadow-sm transition-all hover:from-amber-600 hover:to-amber-700 hover:shadow-md"
+              className="px-6 py-3 bg-amber-600 text-white rounded-xl font-medium hover:bg-amber-700 transition-colors"
             >
-              Update Project
+              Modify Project
             </button>
           </motion.div>
         </div>
@@ -454,143 +410,113 @@ const handleRequest = async (provider) => {
     );
   }
 
-  // ----------------------------- Main UI -----------------------------
   return (
-    <Section className="bg-gradient-to-br from-slate-50 to-blue-50 min-h-screen">
+    <Section className="bg-gradient-to-br from-slate-50 to-blue-50/30 min-h-screen">
       <div className="mx-auto max-w-7xl px-4 py-8">
-        {/* Header with AI insights */}
+        {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mb-10"
+          className="text-center mb-12"
         >
-          <div className="flex items-start gap-4 mb-4">
-            <div className="flex-shrink-0">
-              <div className="relative">
-                <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-xl blur-lg"></div>
-                <div className="relative bg-gradient-to-br from-blue-100 to-purple-100 p-3 rounded-xl border border-blue-200">
-                  <Sparkles className="h-6 w-6 text-blue-700" />
-                </div>
-              </div>
-            </div>
-            <div className="flex-1">
-              <h1 className="text-3xl font-bold text-slate-900 mb-2">
-                {t.title}
-              </h1>
-              <p className="text-slate-600">{t.subtitle}</p>
-            </div>
+          <div className="inline-flex items-center gap-3 mb-4 px-6 py-3 bg-white/80 backdrop-blur-sm rounded-2xl shadow-sm border border-white/50">
+            <Brain className="h-6 w-6 text-blue-600" />
+            <h1 className="text-3xl font-bold bg-gradient-to-br from-slate-800 to-slate-900 bg-clip-text text-transparent">
+              {t.title}
+            </h1>
           </div>
+          <p className="text-slate-700 text-lg max-w-2xl mx-auto">
+            {t.subtitle}
+          </p>
 
-          {/* AI Insights Banner */}
-          {llmInsights && (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 0.2 }}
-              className="p-6 bg-gradient-to-br from-blue-50 to-purple-50 rounded-2xl border border-blue-200 shadow-sm"
-            >
-              <div className="flex items-start gap-3">
-                <Brain className="h-5 w-5 text-blue-700 flex-shrink-0 mt-0.5" />
-                <div className="flex-1">
-                  <h3 className="font-semibold text-slate-900 mb-2">
-                    AI Analysis
-                  </h3>
-                  <p className="text-sm text-slate-700 leading-relaxed">
-                    {llmInsights}
-                  </p>
-                </div>
-              </div>
-            </motion.div>
-          )}
-
-          {/* Project Complexity */}
+          {/* Project Complexity Badge */}
           {projectComplexity && (
             <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3 }}
-              className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-white rounded-full border border-slate-300 shadow-sm"
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: 0.2 }}
+              className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-50 to-blue-50 rounded-full border border-purple-200"
             >
-              <TrendingUp className="h-4 w-4 text-amber-600" />
-              <span className="text-sm font-medium text-slate-700">
-                {t.complexity}:
-              </span>
-              <span className="text-sm font-bold text-amber-600 capitalize">
-                {projectComplexity}
+              <TrendingUp className="h-4 w-4 text-purple-600" />
+              <span className="text-sm font-medium text-purple-900">
+                {t.complexity}: {projectComplexity}/10
               </span>
             </motion.div>
           )}
         </motion.div>
 
-        {/* Filters */}
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4 }}
-          className="mb-8 flex flex-col md:flex-row gap-4"
-        >
-          {/* Search */}
-          <div className="relative flex-1">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={t.search}
-              className="w-full pl-12 pr-4 py-3 bg-white border border-slate-300 rounded-xl text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm"
-            />
-          </div>
-
-          {/* Tech Filter */}
-          <div className="relative md:w-64">
-            <select
-              value={techFilter}
-              onChange={(e) => setTechFilter(e.target.value)}
-              className="w-full appearance-none px-4 py-3 pr-10 bg-white border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm cursor-pointer"
-            >
-              {techOptions.map((tech) => (
-                <option key={tech} value={tech}>
-                  {tech}
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 pointer-events-none" />
-          </div>
-        </motion.div>
-
-        {/* Results count */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.5 }}
-          className="mb-6 text-sm text-slate-600"
-        >
-          {t.showing} <span className="font-semibold text-slate-900">{filteredProviders.length}</span> {t.of}{" "}
-          <span className="font-semibold text-slate-900">{recommendations.length}</span> {t.providers}
-        </motion.div>
-
-        {/* Top Picks */}
-        {topPicks.length > 0 && query === "" && techFilter === t.all && (
+        {/* AI Insights Banner */}
+        {llmInsights && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.6 }}
+            transition={{ delay: 0.3 }}
+            className="mb-8 p-6 rounded-2xl border border-purple-200 bg-gradient-to-br from-purple-50 to-blue-50/50 backdrop-blur-sm"
+          >
+            <div className="flex items-start gap-4">
+              <div className="p-3 bg-purple-100 rounded-xl">
+                <Sparkles className="h-6 w-6 text-purple-600" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold text-purple-900 mb-2">
+                  AI Analysis
+                </h3>
+                <p className="text-sm text-purple-800 leading-relaxed">
+                  {llmInsights.summary}
+                </p>
+                {llmInsights.key_advantages?.length > 0 && (
+                  <div className="mt-4 space-y-2">
+                    {llmInsights.key_advantages.map((advantage, i) => (
+                      <div
+                        key={i}
+                        className="flex items-start gap-2 text-sm text-purple-700"
+                      >
+                        <CheckCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                        <span>{advantage}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Top Picks */}
+        {topPicks.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.4 }}
             className="mb-12"
           >
-            <div className="flex items-center gap-3 mb-6">
-              <Award className="h-6 w-6 text-amber-600" />
-              <h2 className="text-2xl font-bold text-slate-900">{t.topPicks}</h2>
+            <div className="flex items-center justify-between mb-8">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-gradient-to-br from-amber-500 to-amber-600 rounded-xl shadow-sm">
+                  <Award className="h-5 w-5 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-900">
+                    {t.topPicks}
+                  </h2>
+                  <p className="text-slate-600 text-sm">
+                    Best matches from our AI analysis
+                  </p>
+                </div>
+              </div>
             </div>
-            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               {topPicks.map((provider, index) => (
-                <TopPickCard
+                <TopProviderCard
                   key={provider.id}
                   provider={provider}
-                  index={index}
-                  onRequest={() => handleRequest(provider)}
-                  onMessage={() => navigate("/messages")}
-                  isRequesting={requestingId === (provider.providerId || provider.id)}
-                  isRequested={requested.has(provider.providerId || provider.id)}
+                  rank={index + 1}
+                  onRequest={handleRequest}
+                  // Then replace onMessage with:
+                  onMessage={() => navigateToChat(navigate, provider)}
+                  isRequesting={requestingId === provider.id}
+                  isRequested={requested.has(provider.id)}
                   t={t}
                   project={project}
                 />
@@ -599,47 +525,122 @@ const handleRequest = async (provider) => {
           </motion.div>
         )}
 
-        {/* All Providers */}
+        {/* Search & Filters */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.7 }}
+          transition={{ delay: 0.5 }}
+          className="mb-8"
         >
-          <h2 className="text-2xl font-bold text-slate-900 mb-6">
-            {t.allProviders}
-          </h2>
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {filteredProviders.map((provider, index) => (
-              <ProviderCard
-                key={provider.id}
-                provider={provider}
-                index={index}
-                onCompareToggle={
-                  onCompareToggle
-                    ? () => onCompareToggle(provider.id)
-                    : undefined
-                }
-                isCompared={selectedCompare?.has(provider.id)}
-                onRequest={() => handleRequest(provider)}
-                onMessage={() => navigate("/messages")}
-                isRequesting={requestingId === (provider.providerId || provider.id)}
-                isRequested={requested.has(provider.providerId || provider.id)}
-                t={t}
-                project={project}
-              />
-            ))}
+          <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
+            <div className="flex flex-col sm:flex-row gap-4 flex-1 w-full">
+              <div className="relative flex-1 min-w-[280px]">
+                <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-500" />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder={t.search}
+                  className="w-full pl-12 pr-4 py-3 rounded-xl border border-slate-300 bg-white/80 backdrop-blur-sm focus:ring-2 focus:ring-blue-200 focus:border-blue-500 transition-all shadow-sm"
+                />
+              </div>
+
+              <select
+                value={techFilter}
+                onChange={(e) => setTechFilter(e.target.value)}
+                className="px-4 py-3 rounded-xl border border-slate-300 bg-white/80 backdrop-blur-sm focus:ring-2 focus:ring-blue-200 focus:border-blue-500 transition-colors shadow-sm min-w-[200px]"
+              >
+                {techOptions.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="text-sm text-slate-600 bg-white/50 px-4 py-2 rounded-lg">
+              {t.showing}{" "}
+              <span className="font-semibold text-slate-800">
+                {filteredProviders.length}
+              </span>{" "}
+              {t.of}{" "}
+              <span className="font-semibold text-slate-800">
+                {recommendations.length}
+              </span>{" "}
+              {t.providers}
+            </div>
           </div>
         </motion.div>
+
+        {/* All Providers Grid */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.6 }}
+          className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 mb-12"
+        >
+          {filteredProviders.map((provider, index) => (
+            <ProviderCard
+              key={provider.id}
+              provider={provider}
+              index={index}
+              onCompareToggle={() => onCompareToggle?.(provider.id)}
+              isCompared={selectedCompare?.includes(provider.id)}
+              onRequest={() => handleRequest(provider)}
+              onMessage={() => navigate("/messages", { state: { provider } })}
+              isRequesting={requestingId === provider.id}
+              isRequested={requested.has(provider.id)}
+              t={t}
+              project={project}
+            />
+          ))}
+        </motion.div>
+
+        {/* Compare Button */}
+        <AnimatePresence>
+          {selectedCompare?.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              className="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-50"
+            >
+              <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 backdrop-blur-sm">
+                <div className="flex items-center gap-6">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-blue-100 rounded-lg">
+                      <Users className="h-5 w-5 text-blue-700" />
+                    </div>
+                    <div>
+                      <div className="font-semibold text-slate-900">
+                        Compare {selectedCompare.length} providers
+                      </div>
+                      <div className="text-sm text-slate-600">
+                        Side-by-side comparison
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={onProceed}
+                    className="bg-blue-700 text-white px-6 py-3 rounded-xl font-medium hover:bg-blue-800 transition-colors shadow-sm flex items-center gap-2"
+                  >
+                    <span>Proceed to Compare</span>
+                    <ChevronDown className="h-4 w-4 rotate-[-90deg]" />
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </Section>
   );
 }
 
-// ======================== Card Components ========================
+/* -------------------------------- UI COMPONENTS -------------------------------- */
 
-function TopPickCard({
+function TopProviderCard({
   provider,
-  index,
+  rank,
   onRequest,
   onMessage,
   isRequesting,
@@ -647,58 +648,78 @@ function TopPickCard({
   t,
   project,
 }) {
+  const area =
+    Number(project?.sizeSqm || project?.size_sqm) > 0
+      ? Number(project.sizeSqm || project.size_sqm)
+      : 1500;
+  const estCost = (provider.baseCost || 0) + (provider.costPerSqm || 0) * area;
+
+  const rankColors = {
+    1: "from-amber-500 to-amber-600",
+    2: "from-slate-500 to-slate-600",
+    3: "from-orange-500 to-orange-600",
+  };
+
   return (
     <motion.div
-      initial={{ opacity: 0, y: 30 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.1 }}
-      whileHover={{ y: -4, transition: { duration: 0.2 } }}
-      className="group relative"
+      initial={{ opacity: 0, y: 30, scale: 0.95 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      whileHover={{ y: -5, transition: { duration: 0.2 } }}
+      className="relative group"
     >
-      {/* Top pick badge */}
-      <div className="absolute -top-3 left-1/2 -translate-x-1/2 z-10">
-        <div className="flex items-center gap-1 px-3 py-1 bg-gradient-to-r from-amber-500 to-amber-600 text-white text-xs font-bold rounded-full shadow-lg">
-          <Award className="h-3 w-3" />
-          <span>TOP PICK</span>
+      <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-amber-500/10 rounded-3xl blur-xl group-hover:blur-2xl transition-all duration-300"></div>
+
+      <div className="relative bg-white rounded-3xl border-2 border-slate-200/60 shadow-lg overflow-hidden backdrop-blur-sm group-hover:shadow-2xl transition-all duration-300">
+        {/* Rank Badge */}
+        <div className="absolute top-6 right-6 z-10">
+          <div
+            className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${
+              rankColors[rank] || "from-blue-500 to-blue-700"
+            } shadow-lg flex items-center justify-center font-bold text-white text-lg`}
+          >
+            {rank}
+          </div>
         </div>
-      </div>
 
-      {/* Glow effect */}
-      <div className="absolute inset-0 bg-gradient-to-br from-amber-200/50 to-orange-200/50 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 blur-xl"></div>
+        <div className="h-2 bg-gradient-to-r from-blue-500 to-amber-500"></div>
 
-      <div className="relative bg-white rounded-2xl border-2 border-amber-200 shadow-md overflow-hidden backdrop-blur-sm group-hover:shadow-xl transition-all duration-300">
-        <div className="p-6 pt-8">
-          {/* Header */}
-          <div className="mb-5">
-            <h3 className="font-bold text-slate-900 text-lg mb-2">
-              {provider.name}
-            </h3>
-            <div className="flex items-center gap-4 text-sm text-slate-700">
-              <div className="flex items-center gap-1.5">
-                <MapPin className="h-4 w-4 text-slate-500" />
-                <span>{provider.locationEn}</span>
-              </div>
-              {provider.rating && (
-                <div className="flex items-center gap-1.5">
-                  <Star className="h-4 w-4 text-amber-500 fill-amber-500" />
-                  <span className="font-semibold">
-                    {typeof provider.rating === "number"
-                      ? provider.rating.toFixed(1)
-                      : provider.rating}
-                  </span>
+        <div className="p-6">
+          {/* Provider Header */}
+          <div className="flex items-start gap-4 mb-5">
+            <div className="flex-1 min-w-0">
+              <h3 className="font-bold text-xl text-slate-900 mb-2 truncate">
+                {provider.name}
+              </h3>
+              <div className="flex items-center gap-3 text-sm text-slate-700">
+                <div className="flex items-center gap-1">
+                  <MapPin className="h-4 w-4 text-slate-500" />
+                  <span>{provider.locationEn}</span>
                 </div>
-              )}
+                {provider.rating && (
+                  <div className="flex items-center gap-1">
+                    <Star className="h-4 w-4 text-amber-500 fill-amber-500" />
+                    <span className="font-medium">
+                      {typeof provider.rating === "number"
+                        ? provider.rating.toFixed(1)
+                        : provider.rating}
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
-          {/* AI Reason */}
+          {/* AI Recommendation */}
           {provider.aiReason && (
-            <div className="mb-5 p-4 bg-blue-50 rounded-xl border border-blue-200">
-              <div className="flex items-start gap-2">
-                <Brain className="h-4 w-4 text-blue-700 flex-shrink-0 mt-0.5" />
-                <p className="text-sm text-blue-900 leading-relaxed">
-                  {provider.aiReason}
-                </p>
+            <div className="mb-5 p-4 bg-gradient-to-br from-blue-50 to-purple-50 rounded-xl border border-blue-200">
+              <div className="flex items-center gap-2 mb-2">
+                <Brain className="h-4 w-4 text-blue-700" />
+                <div className="text-sm font-medium text-blue-900">
+                  {t.aiReason}
+                </div>
+              </div>
+              <div className="text-sm text-blue-800 leading-relaxed">
+                {provider.aiReason}
               </div>
             </div>
           )}
@@ -717,7 +738,7 @@ function TopPickCard({
             </div>
           )}
 
-          {/* Score */}
+          {/* Score & Cost */}
           <div className="grid grid-cols-1 gap-4 mb-5">
             <div className="text-center p-3 bg-slate-50 rounded-xl border border-slate-200">
               <div className="text-xs text-slate-600 mb-1">{t.score}</div>
@@ -765,7 +786,7 @@ function TopPickCard({
             )}
           </div>
 
-          {/* Actions */}
+          {/* Action Buttons */}
           <div className="flex gap-3">
             <button
               onClick={() => onRequest(provider)}
@@ -791,13 +812,13 @@ function TopPickCard({
                 </span>
               </div>
             </button>
-              <button
-                onClick={onMessage}
-                className="flex-1 py-3 px-4 rounded-xl border border-slate-300 text-slate-700 font-medium hover:border-blue-300 hover:text-blue-700 hover:shadow-sm transition-all flex items-center justify-center gap-2"
-              >
-                <MessageCircle className="h-4 w-4" />
-                <span>{t.message}</span>
-              </button>
+            <button
+              onClick={onMessage}
+              className="flex-1 py-3 px-4 rounded-xl border border-slate-300 text-slate-700 font-medium hover:border-blue-300 hover:text-blue-700 hover:shadow-sm transition-all flex items-center justify-center gap-2"
+            >
+              <MessageCircle className="h-4 w-4" />
+              <span>{t.message}</span>
+            </button>
           </div>
         </div>
       </div>
@@ -821,6 +842,7 @@ function ProviderCard({
     Number(project?.sizeSqm || project?.size_sqm) > 0
       ? Number(project.sizeSqm || project.size_sqm)
       : 1500;
+  const estCost = (provider.baseCost || 0) + (provider.costPerSqm || 0) * area;
 
   return (
     <motion.div
@@ -864,9 +886,7 @@ function ProviderCard({
                   onChange={onCompareToggle}
                   className="rounded border-slate-400 text-blue-700 focus:ring-blue-500"
                 />
-                <span className="font-medium text-slate-700">
-                  {t.compare}
-                </span>
+                <span className="font-medium text-slate-700">{t.compare}</span>
               </label>
             )}
           </div>

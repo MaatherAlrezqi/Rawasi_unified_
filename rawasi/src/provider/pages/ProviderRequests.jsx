@@ -1,168 +1,241 @@
-import React, { useState, useEffect } from 'react';
-import ProviderSidebar from './ProviderSidebar';
+// Updated ProviderRequests.jsx with consistent sidebar layout
+import React, { useState, useEffect } from "react";
+import toast from "react-hot-toast";
+import { useNavigate } from "react-router-dom";
 import {
-  Calendar, CheckCircle2, Clock, DollarSign, MapPin, Search,
-  X, Check, AlertCircle, Eye, Filter, Send, TrendingUp, Building2
-} from 'lucide-react';
-import { requestService } from '../../services/requestService';
-import { supabase } from '../../lib/supabaseClient';
+  Calendar,
+  CheckCircle2,
+  Clock,
+  DollarSign,
+  FileText,
+  MapPin,
+  Search,
+  Users,
+  X,
+  Check,
+  AlertCircle,
+  Send,
+  Inbox,
+  TrendingUp,
+} from "lucide-react";
+import { supabase } from "../../lib/supabase";
+import ProviderSidebar from './ProviderSidebar';
 
 export default function ProviderRequests() {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [filterStatus, setFilterStatus] = useState('all');
+  const navigate = useNavigate();
+
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filterStatus, setFilterStatus] = useState("all");
   const [selectedRequest, setSelectedRequest] = useState(null);
 
-  // Supabase data
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [processingId, setProcessingId] = useState(null);
-  const [stats, setStats] = useState({
-    total: 0,
-    pending: 0,
-    reviewing: 0,
-    accepted: 0,
-    rejected: 0
-  });
+  const [error, setError] = useState(null);
+  const [updatingId, setUpdatingId] = useState(null);
 
-  // Fetch + realtime
+  // Load requests for current provider
   useEffect(() => {
-    let channel;
+    const loadRequests = async () => {
+      try {
+        setLoading(true);
+        setError(null);
 
-    const init = async () => {
-      await fetchRequests();
-      requestNotificationPermission();
-      channel = await setupRealtimeSubscription();
-    };
+        // Get current user from auth
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser();
+        if (userError) throw userError;
+        if (!user) {
+          setError("You are not logged in as a provider.");
+          setLoading(false);
+          return;
+        }
 
-    init();
+        // Get provider row linked to this user
+        const { data: providerRow, error: providerError } = await supabase
+          .from("provider")
+          .select("provider_id, company_name")
+          .eq("auth_user_id", user.id)
+          .maybeSingle();
 
-    return () => {
-      if (channel) {
-        requestService.unsubscribe(channel);
+        if (providerError) throw providerError;
+        if (!providerRow) {
+          setError("No provider profile is linked to this account.");
+          setLoading(false);
+          return;
+        }
+
+        const providerId = providerRow.provider_id;
+
+        // Get requests from project_requests
+        const { data, error: reqError } = await supabase
+          .from("project_requests")
+          .select("*")
+          .eq("provider_id", providerId)
+          .order("created_at", { ascending: false });
+
+        if (reqError) throw reqError;
+
+        const mapped =
+          (data || []).map((row) => ({
+            id: row.id,
+            title: row.title || "Untitled project",
+            client: row.client_name || "Client",
+            location: row.location || "-",
+            budget: row.budget || 0,
+            status: row.status || "pending",
+            date: row.created_at,
+            type: row.project_type || "Residential",
+            description: row.description || "",
+            timeline: row.timeline || null,
+            size: row.size || null,
+            floors: row.floors || null,
+            requirements: row.requirements || [],
+            project_id: row.project_id,
+            user_id: row.user_id,
+          })) ?? [];
+
+        setRequests(mapped);
+      } catch (err) {
+        console.error("Error loading provider requests:", err);
+        setError(err.message || "Failed to load requests");
+      } finally {
+        setLoading(false);
       }
     };
+
+    loadRequests();
   }, []);
 
-  const requestNotificationPermission = () => {
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
-    }
-  };
+  const handleStatusChange = async (requestId, newStatus) => {
+    const previousRequests = [...requests];
 
-  const fetchRequests = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        setLoading(false);
-        return;
-      }
+      setUpdatingId(requestId);
 
-      const data = await requestService.getProviderRequests(user.id);
-      setRequests(data);
-      updateStats(data);
-    } catch (error) {
-      console.error('Error fetching requests:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+      // Find the request to get project_id
+      const request = requests.find((r) => r.id === requestId);
+      if (!request) throw new Error("Request not found");
 
-  const updateStats = (requestsData) => {
-    setStats({
-      total: requestsData.length,
-      pending: requestsData.filter(r => r.status === 'pending').length,
-      reviewing: requestsData.filter(r => r.status === 'reviewing').length,
-      accepted: requestsData.filter(r => r.status === 'accepted').length,
-      rejected: requestsData.filter(r => r.status === 'rejected').length
-    });
-  };
+      // Optimistic update
+      setRequests((prev) =>
+        prev.map((r) => (r.id === requestId ? { ...r, status: newStatus } : r))
+      );
 
-  const setupRealtimeSubscription = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return null;
+      // Update project_requests table
+      const { error: requestError } = await supabase
+        .from("project_requests")
+        .update({
+          status: newStatus,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", requestId);
 
-    const channel = requestService.subscribeToProviderRequests(
-      user.id,
-      (payload) => {
-        console.log('New request change:', payload);
+      if (requestError) throw requestError;
 
-        if (payload.eventType === 'INSERT') {
-          setRequests(prev => {
-            const updated = [payload.new, ...prev];
-            updateStats(updated);
-            return updated;
-          });
+      // Update projects table
+      if (request.project_id) {
+        // Get current provider info for accepted status
+        let providerInfo = {};
+        if (newStatus === "accepted") {
+          const {
+            data: { user },
+          } = await supabase.auth.getUser();
+          const { data: providerRow } = await supabase
+            .from("provider")
+            .select("provider_id, company_name")
+            .eq("auth_user_id", user.id)
+            .maybeSingle();
 
-          showNotification(
-            'New Request Received!',
-            `New construction request for ${payload.new.project_name}`
-          );
-        } else if (payload.eventType === 'UPDATE') {
-          setRequests(prev => {
-            const updated = prev.map(r => r.id === payload.new.id ? payload.new : r);
-            updateStats(updated);
-            return updated;
-          });
+          if (providerRow) {
+            providerInfo = {
+              provider_id: providerRow.provider_id,
+              provider_name: providerRow.company_name,
+            };
+          }
+        }
+
+        const { error: projectError } = await supabase
+          .from("projects")
+          .update({
+            status: newStatus,
+            updated_at: new Date().toISOString(),
+            ...providerInfo,
+          })
+          .eq("id", request.project_id);
+
+        if (projectError) {
+          console.error("Failed to update project status:", projectError);
         }
       }
-    );
 
-    return channel;
-  };
-
-  const showNotification = (title, body) => {
-    if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification(title, { body, icon: '/photo_2025-08-13_21-03-51.png' });
-    }
-  };
-
-  const handleResponse = async (requestId, action) => {
-    if (processingId) return;
-
-    setProcessingId(requestId);
-    try {
-      await requestService.respondToRequest(requestId, action);
-      await fetchRequests();
-      setSelectedRequest(null);
-      
-      showNotification(
-        'Response Sent',
-        `You ${action === 'accept' ? 'accepted' : 'rejected'} the request`
+      toast.success(
+        newStatus === "accepted"
+          ? "✅ Request accepted! Project status updated."
+          : "❌ Request declined. Project status updated."
       );
-    } catch (error) {
-      console.error(`Error ${action}ing request:`, error);
-      alert(`Failed to ${action} request. Please try again.`);
+    } catch (err) {
+      console.error("Error updating status:", err);
+      setRequests(previousRequests);
+      toast.error("Failed to update status: " + err.message);
     } finally {
-      setProcessingId(null);
+      setUpdatingId(null);
     }
   };
 
-  const filteredRequests = requests.filter(request => {
-    const matchesSearch = request.project_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         request.location?.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesFilter = filterStatus === 'all' || request.status === filterStatus;
-    return matchesSearch && matchesFilter;
-  });
+  const handleSendMessage = (request) => {
+    navigate("/provider/messages");
+  };
 
   const getStatusColor = (status) => {
     const colors = {
-      pending: 'bg-yellow-100 text-yellow-700 border-yellow-200',
-      reviewing: 'bg-blue-100 text-blue-700 border-blue-200',
-      accepted: 'bg-green-100 text-green-700 border-green-200',
-      rejected: 'bg-red-100 text-red-700 border-red-200'
+      pending: "bg-yellow-100 text-yellow-700 border-yellow-200",
+      accepted: "bg-green-100 text-green-700 border-green-200",
+      rejected: "bg-red-100 text-red-700 border-red-200",
     };
-    return colors[status] || 'bg-gray-100 text-gray-700 border-gray-200';
+    return colors[status] || "bg-gray-100 text-gray-700 border-gray-200";
   };
 
   const getStatusIcon = (status) => {
-    switch (status) {
-      case 'pending': return <Clock className="w-4 h-4" />;
-      case 'reviewing': return <Eye className="w-4 h-4" />;
-      case 'accepted': return <CheckCircle2 className="w-4 h-4" />;
-      case 'rejected': return <X className="w-4 h-4" />;
-      default: return <AlertCircle className="w-4 h-4" />;
-    }
+    const icons = {
+      pending: Clock,
+      accepted: CheckCircle2,
+      rejected: X,
+    };
+    return icons[status] || Clock;
   };
+
+  const filteredRequests = requests.filter((req) => {
+    const matchesSearch =
+      req.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      req.client.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      req.location.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesFilter =
+      filterStatus === "all" || req.status === filterStatus;
+    return matchesSearch && matchesFilter;
+  });
+
+  const stats = {
+    total: requests.length,
+    pending: requests.filter(r => r.status === 'pending').length,
+    accepted: requests.filter(r => r.status === 'accepted').length,
+    rejected: requests.filter(r => r.status === 'rejected').length
+  };
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen bg-gradient-to-br from-slate-50 via-white to-orange-50/30">
+        <ProviderSidebar />
+        <main className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-orange-500 border-t-transparent mb-4"></div>
+            <p className="text-slate-600">Loading requests...</p>
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen bg-gradient-to-br from-slate-50 via-white to-orange-50/30">
@@ -172,41 +245,48 @@ export default function ProviderRequests() {
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-slate-900 mb-2">Project Requests</h1>
-          <p className="text-slate-600">Manage incoming construction requests</p>
+          <p className="text-slate-600">Review and manage incoming project requests</p>
         </div>
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <div className="bg-white rounded-2xl border-2 border-orange-100 p-6 hover:shadow-lg transition-all">
+            <div className="flex items-center justify-between mb-4">
+              <div className="p-3 rounded-xl bg-blue-100">
+                <Inbox className="w-6 h-6 text-blue-600" />
+              </div>
+            </div>
             <div className="text-2xl font-bold text-slate-900 mb-1">{stats.total}</div>
             <div className="text-sm text-slate-600">Total Requests</div>
           </div>
-          <div className="bg-white rounded-2xl border-2 border-yellow-100 p-6 hover:shadow-lg transition-all">
-            <div className="flex items-center gap-2 mb-2">
-              <Clock className="w-5 h-5 text-yellow-600" />
-              <div className="text-2xl font-bold text-slate-900">{stats.pending}</div>
+
+          <div className="bg-white rounded-2xl border-2 border-orange-100 p-6 hover:shadow-lg transition-all">
+            <div className="flex items-center justify-between mb-4">
+              <div className="p-3 rounded-xl bg-yellow-100">
+                <Clock className="w-6 h-6 text-yellow-600" />
+              </div>
             </div>
+            <div className="text-2xl font-bold text-slate-900 mb-1">{stats.pending}</div>
             <div className="text-sm text-slate-600">Pending</div>
           </div>
-          <div className="bg-white rounded-2xl border-2 border-blue-100 p-6 hover:shadow-lg transition-all">
-            <div className="flex items-center gap-2 mb-2">
-              <Eye className="w-5 h-5 text-blue-600" />
-              <div className="text-2xl font-bold text-slate-900">{stats.reviewing}</div>
+
+          <div className="bg-white rounded-2xl border-2 border-orange-100 p-6 hover:shadow-lg transition-all">
+            <div className="flex items-center justify-between mb-4">
+              <div className="p-3 rounded-xl bg-emerald-100">
+                <CheckCircle2 className="w-6 h-6 text-emerald-600" />
+              </div>
             </div>
-            <div className="text-sm text-slate-600">Reviewing</div>
-          </div>
-          <div className="bg-white rounded-2xl border-2 border-green-100 p-6 hover:shadow-lg transition-all">
-            <div className="flex items-center gap-2 mb-2">
-              <CheckCircle2 className="w-5 h-5 text-green-600" />
-              <div className="text-2xl font-bold text-slate-900">{stats.accepted}</div>
-            </div>
+            <div className="text-2xl font-bold text-slate-900 mb-1">{stats.accepted}</div>
             <div className="text-sm text-slate-600">Accepted</div>
           </div>
-          <div className="bg-white rounded-2xl border-2 border-red-100 p-6 hover:shadow-lg transition-all">
-            <div className="flex items-center gap-2 mb-2">
-              <X className="w-5 h-5 text-red-600" />
-              <div className="text-2xl font-bold text-slate-900">{stats.rejected}</div>
+
+          <div className="bg-white rounded-2xl border-2 border-orange-100 p-6 hover:shadow-lg transition-all">
+            <div className="flex items-center justify-between mb-4">
+              <div className="p-3 rounded-xl bg-red-100">
+                <X className="w-6 h-6 text-red-600" />
+              </div>
             </div>
+            <div className="text-2xl font-bold text-slate-900 mb-1">{stats.rejected}</div>
             <div className="text-sm text-slate-600">Rejected</div>
           </div>
         </div>
@@ -218,7 +298,7 @@ export default function ProviderRequests() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
               <input
                 type="text"
-                placeholder="Search projects or locations..."
+                placeholder="Search requests..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-11 pr-4 py-3 rounded-xl border-2 border-orange-200 focus:border-orange-500 focus:ring-2 focus:ring-orange-200 outline-none transition-all"
@@ -255,172 +335,219 @@ export default function ProviderRequests() {
               >
                 Accepted
               </button>
+              <button
+                onClick={() => setFilterStatus('rejected')}
+                className={`px-4 py-3 rounded-xl font-medium transition-all ${
+                  filterStatus === 'rejected'
+                    ? 'bg-red-500 text-white shadow-lg'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                Rejected
+              </button>
             </div>
           </div>
         </div>
 
-        {/* Requests List */}
-        {loading ? (
-          <div className="text-center py-12">
-            <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-orange-500 border-t-transparent"></div>
-            <p className="mt-4 text-slate-600">Loading requests...</p>
-          </div>
-        ) : filteredRequests.length === 0 ? (
-          <div className="bg-white rounded-2xl border-2 border-orange-100 p-12 text-center">
-            <Building2 className="w-16 h-16 text-slate-300 mx-auto mb-4" />
-            <p className="text-slate-600">No requests found</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {filteredRequests.map((request) => (
-              <div
-                key={request.id}
-                className="bg-white rounded-2xl border-2 border-orange-100 p-6 hover:shadow-lg transition-all"
-              >
-                <div className="flex items-start justify-between mb-4">
-                  <div className="flex-1">
-                    <h3 className="text-xl font-bold text-slate-900 mb-2">
-                      {request.project_name || 'Unnamed Project'}
-                    </h3>
-                    <div className="flex flex-wrap gap-4 text-sm text-slate-600">
-                      <div className="flex items-center gap-2">
-                        <MapPin className="w-4 h-4 text-orange-600" />
-                        {request.location || 'Location not specified'}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Building2 className="w-4 h-4 text-orange-600" />
-                        {request.technology || 'Technology not specified'}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <DollarSign className="w-4 h-4 text-orange-600" />
-                        {request.budget ? `SAR ${(request.budget / 1000).toFixed(0)}K` : 'Budget not specified'}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Calendar className="w-4 h-4 text-orange-600" />
-                        {request.created_at ? new Date(request.created_at).toLocaleDateString() : 'Date not specified'}
-                      </div>
-                    </div>
-                  </div>
-                  <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium border ${getStatusColor(request.status)}`}>
-                    {getStatusIcon(request.status)}
-                    {request.status?.charAt(0).toUpperCase() + request.status?.slice(1)}
-                  </div>
-                </div>
-
-                {request.description && (
-                  <p className="text-slate-600 mb-4">{request.description}</p>
-                )}
-
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => setSelectedRequest(request)}
-                    className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-orange-200 text-orange-600 font-medium hover:bg-orange-50 transition-all"
-                  >
-                    <Eye className="w-4 h-4" />
-                    View Details
-                  </button>
-                  
-                  {request.status === 'pending' && (
-                    <>
-                      <button
-                        onClick={() => handleResponse(request.id, 'accept')}
-                        disabled={processingId === request.id}
-                        className="flex items-center gap-2 px-4 py-2 rounded-xl bg-green-500 text-white font-medium hover:bg-green-600 disabled:opacity-50 transition-all"
-                      >
-                        <Check className="w-4 h-4" />
-                        Accept
-                      </button>
-                      <button
-                        onClick={() => handleResponse(request.id, 'reject')}
-                        disabled={processingId === request.id}
-                        className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-500 text-white font-medium hover:bg-red-600 disabled:opacity-50 transition-all"
-                      >
-                        <X className="w-4 h-4" />
-                        Reject
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-            ))}
+        {/* Error Message */}
+        {error && (
+          <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-6 mb-6 flex items-start gap-3">
+            <AlertCircle className="w-6 h-6 text-red-600 flex-shrink-0 mt-1" />
+            <div>
+              <h3 className="font-semibold text-red-900 mb-1">Error</h3>
+              <p className="text-red-700">{error}</p>
+            </div>
           </div>
         )}
 
-        {/* Request Detail Modal */}
-        {selectedRequest && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-              <div className="p-6 border-b border-orange-200">
-                <div className="flex items-start justify-between">
-                  <h2 className="text-2xl font-bold text-slate-900">
-                    {selectedRequest.project_name || 'Project Details'}
-                  </h2>
-                  <button
-                    onClick={() => setSelectedRequest(null)}
-                    className="p-2 hover:bg-slate-100 rounded-lg transition-all"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-              </div>
-              
-              <div className="p-6 space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Location</label>
-                  <p className="text-slate-900">{selectedRequest.location || 'Not specified'}</p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Technology</label>
-                  <p className="text-slate-900">{selectedRequest.technology || 'Not specified'}</p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Budget</label>
-                  <p className="text-slate-900">
-                    {selectedRequest.budget ? `SAR ${selectedRequest.budget.toLocaleString()}` : 'Not specified'}
-                  </p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
-                  <p className="text-slate-900">{selectedRequest.description || 'No description provided'}</p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Status</label>
-                  <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium border ${getStatusColor(selectedRequest.status)}`}>
-                    {getStatusIcon(selectedRequest.status)}
-                    {selectedRequest.status?.charAt(0).toUpperCase() + selectedRequest.status?.slice(1)}
-                  </div>
-                </div>
-              </div>
-              
-              <div className="p-6 border-t border-orange-200 flex justify-end gap-3">
-                <button
-                  onClick={() => setSelectedRequest(null)}
-                  className="px-6 py-2 rounded-xl border-2 border-orange-200 text-slate-700 font-medium hover:bg-orange-50 transition-all"
+        {/* Requests Grid */}
+        {!error && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {filteredRequests.map((request) => {
+              const StatusIcon = getStatusIcon(request.status);
+              const isPending = request.status === "pending";
+              const isAccepted = request.status === "accepted";
+
+              return (
+                <div
+                  key={request.id}
+                  className="group bg-white rounded-2xl border-2 border-orange-100 p-6 hover:shadow-xl transition-all"
                 >
-                  Close
-                </button>
-                {selectedRequest.status === 'pending' && (
-                  <>
-                    <button
-                      onClick={() => {
-                        handleResponse(selectedRequest.id, 'accept');
-                      }}
-                      className="px-6 py-2 rounded-xl bg-green-500 text-white font-medium hover:bg-green-600 transition-all"
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="flex-1">
+                      <h3 className="text-xl font-bold text-slate-900 mb-1 group-hover:text-orange-600 transition-colors">
+                        {request.title}
+                      </h3>
+                      <p className="text-sm text-slate-600">{request.type}</p>
+                    </div>
+                    <span
+                      className={`px-3 py-1.5 rounded-full text-xs font-semibold uppercase flex items-center gap-1 border ${getStatusColor(
+                        request.status
+                      )}`}
                     >
-                      Accept Request
-                    </button>
+                      <StatusIcon className="w-3 h-3" />
+                      {request.status}
+                    </span>
+                  </div>
+
+                  <div className="space-y-3 mb-4">
+                    <div className="flex items-center gap-2 text-sm text-slate-600">
+                      <div className="p-2 bg-slate-50 rounded-lg group-hover:bg-orange-50 transition-colors">
+                        <Users className="w-4 h-4 text-orange-600" />
+                      </div>
+                      <span>{request.client}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm text-slate-600">
+                      <div className="p-2 bg-slate-50 rounded-lg group-hover:bg-orange-50 transition-colors">
+                        <MapPin className="w-4 h-4 text-orange-600" />
+                      </div>
+                      <span>{request.location}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm text-slate-600">
+                      <div className="p-2 bg-slate-50 rounded-lg group-hover:bg-orange-50 transition-colors">
+                        <DollarSign className="w-4 h-4 text-orange-600" />
+                      </div>
+                      <span>
+                        SAR {Number(request.budget).toLocaleString("en-US")}
+                      </span>
+                    </div>
+                    {request.timeline && (
+                      <div className="flex items-center gap-2 text-sm text-slate-600">
+                        <div className="p-2 bg-slate-50 rounded-lg group-hover:bg-orange-50 transition-colors">
+                          <Calendar className="w-4 h-4 text-orange-600" />
+                        </div>
+                        <span>{request.timeline}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="pt-4 border-t border-orange-100 space-y-2">
                     <button
-                      onClick={() => {
-                        handleResponse(selectedRequest.id, 'reject');
-                      }}
-                      className="px-6 py-2 rounded-xl bg-red-500 text-white font-medium hover:bg-red-600 transition-all"
+                      onClick={() =>
+                        setSelectedRequest(
+                          selectedRequest === request.id ? null : request.id
+                        )
+                      }
+                      className="w-full px-4 py-2.5 bg-slate-50 text-slate-700 rounded-xl hover:bg-orange-50 hover:text-orange-600 transition-all font-medium text-sm"
                     >
-                      Reject Request
+                      {selectedRequest === request.id
+                        ? "Hide Details"
+                        : "View Details"}
                     </button>
-                  </>
-                )}
-              </div>
-            </div>
+
+                    {isPending && (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() =>
+                            handleStatusChange(request.id, "accepted")
+                          }
+                          disabled={updatingId === request.id}
+                          className="flex-1 px-4 py-2.5 bg-gradient-to-r from-green-600 to-green-700 text-white rounded-xl hover:shadow-lg transition-all font-medium text-sm flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          <Check className="w-4 h-4" />
+                          {updatingId === request.id ? "Saving..." : "Accept"}
+                        </button>
+                        <button
+                          onClick={() =>
+                            handleStatusChange(request.id, "rejected")
+                          }
+                          disabled={updatingId === request.id}
+                          className="flex-1 px-4 py-2.5 bg-white border-2 border-red-500 text-red-600 rounded-xl hover:bg-red-50 transition-all font-medium text-sm flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          <X className="w-4 h-4" />
+                          {updatingId === request.id ? "Saving..." : "Decline"}
+                        </button>
+                      </div>
+                    )}
+
+                    {isAccepted && (
+                      <button
+                        onClick={() => handleSendMessage(request)}
+                        className="w-full px-4 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl hover:shadow-lg transition-all font-medium text-sm flex items-center justify-center gap-2"
+                      >
+                        <Send className="w-4 h-4" />
+                        Send Message
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Expandable Details */}
+                  {selectedRequest === request.id && (
+                    <div className="mt-4 pt-4 border-t border-orange-100 space-y-4">
+                      {request.description && (
+                        <div>
+                          <h4 className="font-semibold text-slate-900 mb-2 text-sm">
+                            Description
+                          </h4>
+                          <p className="text-sm text-slate-700 leading-relaxed">
+                            {request.description}
+                          </p>
+                        </div>
+                      )}
+
+                      <div>
+                        <h4 className="font-semibold text-slate-900 mb-2 text-sm">
+                          Project Details
+                        </h4>
+                        <div className="grid grid-cols-2 gap-2 text-sm">
+                          {request.size && (
+                            <div className="bg-slate-50 rounded-lg p-2">
+                              <span className="text-slate-600">Size:</span>
+                              <span className="font-medium text-slate-900 ml-2">
+                                {request.size}
+                              </span>
+                            </div>
+                          )}
+                          {request.floors && (
+                            <div className="bg-slate-50 rounded-lg p-2">
+                              <span className="text-slate-600">Floors:</span>
+                              <span className="font-medium text-slate-900 ml-2">
+                                {request.floors}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {request.requirements &&
+                        request.requirements.length > 0 && (
+                          <div>
+                            <h4 className="font-semibold text-slate-900 mb-2 text-sm">
+                              Requirements
+                            </h4>
+                            <ul className="space-y-1">
+                              {request.requirements.map((req, idx) => (
+                                <li
+                                  key={idx}
+                                  className="flex items-center gap-2 text-sm text-slate-700"
+                                >
+                                  <div className="w-1.5 h-1.5 bg-orange-500 rounded-full"></div>
+                                  {req}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Empty State */}
+        {filteredRequests.length === 0 && !error && (
+          <div className="bg-white rounded-2xl border-2 border-orange-100 p-12 text-center">
+            <FileText className="w-16 h-16 text-slate-300 mx-auto mb-4" />
+            <h3 className="text-lg font-semibold text-slate-900 mb-2">
+              No requests found
+            </h3>
+            <p className="text-slate-600">
+              {searchTerm
+                ? "Try adjusting your search or filter criteria"
+                : "You don't have any project requests yet"}
+            </p>
           </div>
         )}
       </main>
