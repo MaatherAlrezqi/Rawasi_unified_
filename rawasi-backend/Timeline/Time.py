@@ -6,6 +6,7 @@ Flask wrapper for the construction timeline prediction model
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import google.generativeai as genai
+from google.generativeai.types import GenerationConfig
 import re
 import os
 from dotenv import load_dotenv
@@ -31,7 +32,7 @@ class ModernConstructionTimePredictor:
                 print(f"⚠️ AI initialization failed: {e}")
                 self.ai_enabled = False
         else:
-            print("⚠️ No API key - using fallback estimation")
+            print("⚠️ No API key - AI service unavailable")
             self.ai_enabled = False
         
         # Modern construction constraints
@@ -63,6 +64,54 @@ class ModernConstructionTimePredictor:
             "Waffle-Crete building system (precast concrete panels for wall & slab)"
         ]
         
+        # Detailed efficiency factors from Document 2
+        self.efficiency_factors = {
+            # Original 'standard' value
+            'Standard': 0.30,
+            
+            # 3D Concrete panels / 3D printing
+            '3D_Concrete_Panels': 0.40,
+            
+            # Sismo
+            'Sismo': 0.40,
+            
+            # EPS WALL PANEL / Sandwich panels
+            'EPS_Wall_Panel': 0.50,
+            
+            # Tunnel Form / Tunnel Formwork
+            'Tunnel_Form': 0.50,
+            
+            # Precast system / Precast Concrete
+            'Precast_System': 0.60,
+            
+            # Insulated Concrete Form (ICF)
+            'ICF': 0.60,
+            
+            # Waffle-Crete (precast)
+            'Waffle_Crete': 0.60,
+            
+            # Modular Building System
+            'Modular_Building': 0.65,
+            
+            # Autoclaved Aerated Concrete / ALC PANEL
+            'ALC_Panel': 0.75,
+            
+            # Steel Frame
+            'Steel_Frame': 0.75,
+            
+            # Form Work (Light Weight Foam Concrete)
+            'Light_Weight_Foam_Formwork': 0.80,
+            
+            # Permanent Formwork
+            'Permanent_Formwork': 0.80,
+            
+            # Post-Tensioning
+            'Post_Tensioning': 0.85,
+            
+            # Rammed Earth (No time improvement)
+            'Rammed_Earth': 1.00
+        }
+        
     def extract_numeric_value(self, text):
         """Extract numeric value from AI response"""
         numbers = re.findall(r'\d+\.?\d*', text)
@@ -87,17 +136,10 @@ class ModernConstructionTimePredictor:
             selected_techniques = self.all_techniques
         
         if not self.ai_enabled:
-            # Use modern rule-based estimation
-            predicted_months = self.modern_fallback_estimation(area_sqm, num_floors, complexity, selected_techniques)
-            
             return {
-                'success': True,
-                'area_sqm': area_sqm,
-                'num_floors': num_floors,
-                'complexity': complexity,
-                'predicted_months': round(predicted_months, 1),
-                'techniques_used': selected_techniques,
-                'method': 'fallback'
+                'success': False,
+                'error': 'AI service not available',
+                'message': 'Timeline prediction requires AI service. Please configure GEMINI_API_KEY.'
             }
         
         techniques_list = "\n".join([f"- {tech}" for tech in selected_techniques])
@@ -127,20 +169,28 @@ class ModernConstructionTimePredictor:
         """
         
         try:
-            response = self.model.generate_content(prompt)
+            response = self.model.generate_content(
+                prompt,
+                generation_config=GenerationConfig(
+                    temperature=0.0,  # deterministic output
+                    top_p=1.0,
+                    top_k=1
+                )
+            )
             response_text = response.text.strip()
             
             # Extract numeric value
             predicted_months = self.extract_numeric_value(response_text)
             
             if predicted_months is None:
-                # Fallback to modern estimation
-                predicted_months = self.modern_fallback_estimation(area_sqm, num_floors, complexity, selected_techniques)
-                method = 'fallback'
-            else:
-                # Apply modern constraints
-                predicted_months = self.validate_time(predicted_months)
-                method = 'ai'
+                return {
+                    'success': False,
+                    'error': 'Failed to parse AI response',
+                    'message': 'AI did not return a valid numeric prediction'
+                }
+            
+            # Apply modern constraints
+            predicted_months = self.validate_time(predicted_months)
             
             return {
                 'success': True,
@@ -149,78 +199,16 @@ class ModernConstructionTimePredictor:
                 'complexity': complexity,
                 'predicted_months': round(predicted_months, 1),
                 'techniques_used': selected_techniques,
-                'method': method
+                'method': 'ai'
             }
             
         except Exception as e:
             print(f"⚠️ AI prediction failed: {e}")
-            # Fallback to modern estimation
-            predicted_months = self.modern_fallback_estimation(area_sqm, num_floors, complexity, selected_techniques)
-            
             return {
-                'success': True,
-                'area_sqm': area_sqm,
-                'num_floors': num_floors,
-                'complexity': complexity,
-                'predicted_months': round(predicted_months, 1),
-                'techniques_used': selected_techniques,
-                'method': 'fallback',
-                'error': str(e)
+                'success': False,
+                'error': str(e),
+                'message': 'AI prediction failed. Please try again.'
             }
-    
-    def modern_fallback_estimation(self, area_sqm, num_floors, complexity, techniques):
-        """Modern construction estimation with specific techniques"""
-        
-        # Base efficiency factors for different technique categories
-        efficiency_factors = {
-            # High efficiency - prefabricated systems
-            'precast': 0.22,  # Precast, ALC, 3D panels, Modular systems
-            # Medium-high efficiency - rapid formwork
-            'formwork': 0.25,  # Tunnel form, ICF, Permanent formwork
-            # Medium efficiency - lightweight systems
-            'lightweight': 0.28,  # Lightweight concrete, Aerated concrete
-            # Standard modern efficiency
-            'standard': 0.30   # Other modern techniques
-        }
-        
-        # Determine the most efficient technique category being used
-        base_rate = efficiency_factors['standard']  # Default
-        
-        # Check for high efficiency techniques
-        precast_keywords = ['precast', 'alc', '3d concrete', 'modular', 'sandwich panels', 'waffle-crete']
-        formwork_keywords = ['tunnel form', 'tunnel formwork', 'icf', 'insulated concrete form', 'permanent formwork']
-        lightweight_keywords = ['lightweight', 'aerated', 'eps', 'foam concrete']
-        
-        techniques_lower = [tech.lower() for tech in techniques]
-        
-        if any(keyword in ' '.join(techniques_lower) for keyword in precast_keywords):
-            base_rate = efficiency_factors['precast']
-        elif any(keyword in ' '.join(techniques_lower) for keyword in formwork_keywords):
-            base_rate = efficiency_factors['formwork']
-        elif any(keyword in ' '.join(techniques_lower) for keyword in lightweight_keywords):
-            base_rate = efficiency_factors['lightweight']
-        
-        # Complexity impact (1-5 scale)
-        complexity_multiplier = 0.85 + (complexity * 0.06)
-        
-        # Floor multiplier optimized for modern techniques
-        if num_floors <= 5:
-            floor_multiplier = 1.0
-        elif num_floors <= 15:
-            floor_multiplier = 1.02
-        elif num_floors <= 30:
-            floor_multiplier = 1.05
-        else:
-            floor_multiplier = 1.12
-        
-        # Calculate base time
-        base_time = (area_sqm / 1000) * base_rate
-        
-        # Apply multipliers
-        adjusted_time = base_time * complexity_multiplier * floor_multiplier
-        
-        # Apply constraints
-        return self.validate_time(adjusted_time)
 
 # Initialize predictor
 predictor = ModernConstructionTimePredictor()
@@ -248,7 +236,7 @@ def predict_timeline():
         complexity = int(data.get('complexity', 3))
         tech_needs = data.get('techNeeds', [])
         
-        print(f"\n📥 Timeline Request:")
+        print(f"\n🔥 Timeline Request:")
         print(f"   Area: {area_sqm} sqm")
         print(f"   Floors: {num_floors}")
         print(f"   Complexity: {complexity}/5")
@@ -262,9 +250,12 @@ def predict_timeline():
             selected_techniques=tech_needs if tech_needs else None
         )
         
-        print(f"✅ Predicted timeline: {result['predicted_months']} months ({result['method']})")
+        if result['success']:
+            print(f"✅ Predicted timeline: {result['predicted_months']} months ({result['method']})")
+        else:
+            print(f"❌ Prediction failed: {result.get('message')}")
         
-        return jsonify(result)
+        return jsonify(result), 200 if result['success'] else 500
         
     except Exception as e:
         print(f"❌ Error: {e}")
@@ -282,6 +273,7 @@ if __name__ == '__main__':
     print("="*70)
     print(f"✅ AI enabled: {predictor.ai_enabled}")
     print(f"✅ Techniques available: {len(predictor.all_techniques)}")
+    print(f"✅ Efficiency factors loaded: {len(predictor.efficiency_factors)}")
     print("="*70)
     print("📡 Server: http://localhost:5002")
     print("="*70 + "\n")
