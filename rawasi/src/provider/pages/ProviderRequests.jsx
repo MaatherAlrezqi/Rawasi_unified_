@@ -20,9 +20,15 @@ import {
 } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import ProviderSidebar from './ProviderSidebar';
+//-------------proxy
+import ProviderRequestService from "../../services/ProviderRequestService";
+//----------------proxy
 
 export default function ProviderRequests() {
   const navigate = useNavigate();
+  //-----------proxy
+  const service = new ProviderRequestService();
+//-----------------proxy
 
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
@@ -32,157 +38,128 @@ export default function ProviderRequests() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [updatingId, setUpdatingId] = useState(null);
-
+//--------------------------------- proxy 
   // Load requests for current provider
   useEffect(() => {
     const loadRequests = async () => {
-      try {
-        setLoading(true);
-        setError(null);
+  try {
+    setLoading(true);
+    setError(null);
 
-        // Get current user from auth
-        const {
-          data: { user },
-          error: userError,
-        } = await supabase.auth.getUser();
-        if (userError) throw userError;
-        if (!user) {
-          setError("You are not logged in as a provider.");
-          setLoading(false);
-          return;
-        }
+    //  Get current user through service
+    const {
+      data: { user },
+      error: userError,
+    } = await service.getCurrentUser();
 
-        // Get provider row linked to this user
-        const { data: providerRow, error: providerError } = await supabase
-          .from("provider")
-          .select("provider_id, company_name")
-          .eq("auth_user_id", user.id)
-          .maybeSingle();
+    if (userError) throw new Error(userError.message);
+    if (!user) {
+      setError("You are not logged in as a provider.");
+      return;
+    }
 
-        if (providerError) throw providerError;
-        if (!providerRow) {
-          setError("No provider profile is linked to this account.");
-          setLoading(false);
-          return;
-        }
+    //  Get provider row
+    const {
+      data: providerRow,
+      error: providerError,
+    } = await service.getProviderByUserId(user.id);
 
-        const providerId = providerRow.provider_id;
+    if (providerError) throw new Error(providerError.message);
+    if (!providerRow) {
+      setError("No provider profile is linked to this account.");
+      return;
+    }
 
-        // Get requests from project_requests
-        const { data, error: reqError } = await supabase
-          .from("project_requests")
-          .select("*")
-          .eq("provider_id", providerId)
-          .order("created_at", { ascending: false });
+    const providerId = providerRow.provider_id;
 
-        if (reqError) throw reqError;
+    // Fetch provider requests
+    const {
+      data,
+      error: reqError,
+    } = await service.getRequestsForProvider(providerId);
 
-        const mapped =
-          (data || []).map((row) => ({
-            id: row.id,
-            title: row.title || "Untitled project",
-            client: row.client_name || "Client",
-            location: row.location || "-",
-            budget: row.budget || 0,
-            status: row.status || "pending",
-            date: row.created_at,
-            type: row.project_type || "Residential",
-            description: row.description || "",
-            timeline: row.timeline || null,
-            size: row.size || null,
-            floors: row.floors || null,
-            requirements: row.requirements || [],
-            project_id: row.project_id,
-            user_id: row.user_id,
-          })) ?? [];
+    if (reqError) throw new Error(reqError.message);
 
-        setRequests(mapped);
-      } catch (err) {
-        console.error("Error loading provider requests:", err);
-        setError(err.message || "Failed to load requests");
-      } finally {
-        setLoading(false);
-      }
-    };
+    //  Map results
+    const mapped = (data || []).map((row) => ({
+      id: row.id,
+      title: row.title || "Untitled project",
+      client: row.client_name || "Client",
+      location: row.location || "-",
+      budget: row.budget || 0,
+      status: row.status || "pending",
+      date: row.created_at,
+      type: row.project_type || "Residential",
+      description: row.description || "",
+      timeline: row.timeline || null,
+      size: row.size || null,
+      floors: row.floors || null,
+      requirements: row.requirements || [],
+      project_id: row.project_id,
+      user_id: row.user_id,
+    }));
 
+    setRequests(mapped);
+
+  } catch (err) {
+    console.error(" loadRequests error:", err);
+    setError(err.message);
+  } finally {
+    setLoading(false);
+  }
+};
     loadRequests();
   }, []);
-
+  //--------------------- proxy 
+//----------- proxy 
   const handleStatusChange = async (requestId, newStatus) => {
-    const previousRequests = [...requests];
+  const prev = [...requests];
 
-    try {
-      setUpdatingId(requestId);
+  try {
+    setUpdatingId(requestId);
 
-      // Find the request to get project_id
-      const request = requests.find((r) => r.id === requestId);
-      if (!request) throw new Error("Request not found");
+    const request = requests.find(r => r.id === requestId);
+    if (!request) throw new Error("Request not found");
 
-      // Optimistic update
-      setRequests((prev) =>
-        prev.map((r) => (r.id === requestId ? { ...r, status: newStatus } : r))
-      );
+    setRequests(prev =>
+      prev.map(r => (r.id === requestId ? { ...r, status: newStatus } : r))
+    );
 
-      // Update project_requests table
-      const { error: requestError } = await supabase
-        .from("project_requests")
-        .update({
-          status: newStatus,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", requestId);
+    await service.updateRequestStatus(requestId, newStatus);
 
-      if (requestError) throw requestError;
+    if (request.project_id) {
+      let providerInfo = {};
 
-      // Update projects table
-      if (request.project_id) {
-        // Get current provider info for accepted status
-        let providerInfo = {};
-        if (newStatus === "accepted") {
-          const {
-            data: { user },
-          } = await supabase.auth.getUser();
-          const { data: providerRow } = await supabase
-            .from("provider")
-            .select("provider_id, company_name")
-            .eq("auth_user_id", user.id)
-            .maybeSingle();
+      if (newStatus === "accepted") {
+        const { data: user } = await service.getCurrentUser();
+        const { data: providerRow } = await service.getProviderByUserId(user.id);
 
-          if (providerRow) {
-            providerInfo = {
-              provider_id: providerRow.provider_id,
-              provider_name: providerRow.company_name,
-            };
-          }
-        }
-
-        const { error: projectError } = await supabase
-          .from("projects")
-          .update({
-            status: newStatus,
-            updated_at: new Date().toISOString(),
-            ...providerInfo,
-          })
-          .eq("id", request.project_id);
-
-        if (projectError) {
-          console.error("Failed to update project status:", projectError);
+        if (providerRow) {
+          providerInfo = {
+            provider_id: providerRow.provider_id,
+            provider_name: providerRow.company_name,
+          };
         }
       }
 
-      toast.success(
-        newStatus === "accepted"
-          ? "✅ Request accepted! Project status updated."
-          : "❌ Request declined. Project status updated."
+      await service.updateProjectStatus(
+        request.project_id,
+        newStatus,
+        providerInfo
       );
-    } catch (err) {
-      console.error("Error updating status:", err);
-      setRequests(previousRequests);
-      toast.error("Failed to update status: " + err.message);
-    } finally {
-      setUpdatingId(null);
     }
-  };
+
+    toast.success("Status updated!");
+
+  } catch (err) {
+    console.error(err);
+    toast.error(err.message);
+    setRequests(prev);
+  } finally {
+    setUpdatingId(null);
+  }
+};
+//----------------------- proxy 
 
   const handleSendMessage = (request) => {
     navigate("/provider/messages");

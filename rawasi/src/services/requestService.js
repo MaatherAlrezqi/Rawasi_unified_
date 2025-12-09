@@ -1,4 +1,9 @@
+// src/services/requestService.js
 import { supabase } from '../lib/supabaseClient';
+//------------------------------- Start of Proxy addition -------------------------------
+import RealDatabaseHandler from "../services/database/RealDatabaseHandler";
+import ProxyDatabaseHandler from "../services/database/ProxyDatabaseHandler";
+//-------------------------------------------- End of Proxy addition -------------------------------
 
 export const requestService = {
   // Create a request (owner side)
@@ -8,9 +13,10 @@ export const requestService = {
       if (!req.providerId && !req.directoryProviderId) {
         throw new Error('Provide providerId (direct) OR directoryProviderId (directory).');
       }
-if (req.providerId && req.directoryProviderId) {
-  throw new Error('Use either providerId OR directoryProviderId, not both.');
-}
+      if (req.providerId && req.directoryProviderId) {
+        throw new Error('Use either providerId OR directoryProviderId, not both.');
+      }
+
       const payload = {
         project_id: req.projectId ?? null,
         project_owner_id: req.projectOwnerId,           // RLS checks this equals auth.uid()
@@ -21,17 +27,16 @@ if (req.providerId && req.directoryProviderId) {
         budget: req.budget ?? null,
         timeline: req.timeline ?? null,
         message:
-          req.message ??
-          'New project request from Rawasi platform. Please review and respond.',
+          req.message ?? 'New project request from Rawasi platform. Please review and respond.',
         status: 'pending'
       };
 
-      const { data, error } = await supabase
-        .from('requests')
-        .insert([payload])
-        .select()
-        .single();
+      //------------------------------- Start of Proxy addition -------------------------------
+      const realDB = new RealDatabaseHandler();
+      const db = new ProxyDatabaseHandler(realDB, true); // Using Proxy to interact with data instead of direct supabase
+      //-------------------------------------------- End of Proxy addition -------------------------------
 
+      const { data, error } = await db.createRequest(payload);  // Using Proxy method to create request
       if (error) throw error;
       return data;
     } catch (e) {
@@ -43,10 +48,12 @@ if (req.providerId && req.directoryProviderId) {
   // Provider inbox — let RLS filter (works for both direct & claimed)
   async getProviderRequests() {
     try {
-      const { data, error } = await supabase
-        .from('requests')
-        .select('*')
-        .order('created_at', { ascending: false });
+      //------------------------------- Start of Proxy addition -------------------------------
+      const realDB = new RealDatabaseHandler();
+      const db = new ProxyDatabaseHandler(realDB, true); // Using Proxy to interact with data instead of direct supabase
+      //-------------------------------------------- End of Proxy addition -------------------------------
+
+      const { data, error } = await db.getProviderRequests();  // Using Proxy method here
       if (error) throw error;
       return data || [];
     } catch (e) {
@@ -58,11 +65,12 @@ if (req.providerId && req.directoryProviderId) {
   // Owner’s outbox
   async getProjectOwnerRequests(projectOwnerId) {
     try {
-      const { data, error } = await supabase
-        .from('requests')
-        .select('*')
-        .eq('project_owner_id', projectOwnerId)
-        .order('created_at', { ascending: false });
+      //------------------------------- Start of Proxy addition -------------------------------
+      const realDB = new RealDatabaseHandler();
+      const db = new ProxyDatabaseHandler(realDB, true); // Using Proxy to interact with data instead of direct supabase
+      //-------------------------------------------- End of Proxy addition -------------------------------
+
+      const { data, error } = await db.getProjectOwnerRequests(projectOwnerId);  // Using Proxy method here
       if (error) throw error;
       return data || [];
     } catch (e) {
@@ -77,12 +85,13 @@ if (req.providerId && req.directoryProviderId) {
       if (!['accepted', 'rejected'].includes(status)) {
         throw new Error('Invalid status. Must be "accepted" or "rejected"');
       }
-      const { data, error } = await supabase
-        .from('requests')
-        .update({ status, responded_at: new Date().toISOString() })
-        .eq('id', requestId)
-        .select()
-        .single();
+
+      //------------------------------- Start of Proxy addition -------------------------------
+      const realDB = new RealDatabaseHandler();
+      const db = new ProxyDatabaseHandler(realDB, true); // Using Proxy to interact with data instead of direct supabase
+      //-------------------------------------------- End of Proxy addition -------------------------------
+
+      const { data, error } = await db.updateRequestStatus(requestId, status);  // Using Proxy method here
       if (error) throw error;
       return data;
     } catch (e) {
@@ -93,11 +102,12 @@ if (req.providerId && req.directoryProviderId) {
 
   // Single request
   async getRequestById(requestId) {
-    const { data, error } = await supabase
-      .from('requests')
-      .select('*')
-      .eq('id', requestId)
-      .single();
+    //------------------------------- Start of Proxy addition -------------------------------
+    const realDB = new RealDatabaseHandler();
+    const db = new ProxyDatabaseHandler(realDB, true); // Using Proxy to interact with data instead of direct supabase
+    //-------------------------------------------- End of Proxy addition -------------------------------
+
+    const { data, error } = await db.getRequestById(requestId);  // Using Proxy method here
     if (error) throw error;
     return data;
   },
@@ -126,60 +136,56 @@ if (req.providerId && req.directoryProviderId) {
 
   // Realtime — rely on RLS (one channel is enough)
   subscribeToProviderRequests(callback) {
-    const channel = supabase
-      .channel('provider-requests')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'requests' },
-        payload => callback(payload)
-      )
-      .subscribe();
+    //------------------------------- Start of Proxy addition -------------------------------
+    const realDB = new RealDatabaseHandler();
+    const db = new ProxyDatabaseHandler(realDB, true); // Using Proxy to interact with data instead of direct supabase
+    //-------------------------------------------- End of Proxy addition -------------------------------
+
+    const channel = db.subscribeToProviderRequests(callback);  // Using Proxy method here
     return channel;
   },
 
   subscribeToProjectOwnerRequests(projectOwnerId, callback) {
-    const channel = supabase
-      .channel(`owner-requests-${projectOwnerId}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'requests', filter: `project_owner_id=eq.${projectOwnerId}` },
-        payload => callback(payload)
-      )
-      .subscribe();
+    //------------------------------- Start of Proxy addition -------------------------------
+    const realDB = new RealDatabaseHandler();
+    const db = new ProxyDatabaseHandler(realDB, true); // Using Proxy to interact with data instead of direct supabase
+    //-------------------------------------------- End of Proxy addition -------------------------------
+
+    const channel = db.subscribeToProjectOwnerRequests(projectOwnerId, callback);  // Using Proxy method here
     return channel;
   },
 
   unsubscribe(channel) {
-    if (channel) supabase.removeChannel(channel);
+    if (channel) supabase.removeChannel(channel);  // If using Proxy, remove the channel using Proxy method
   },
 
-async requestExists(projectId, providerUserId, projectOwnerId, directoryProviderId) {
-  try {
-    let query = supabase
-      .from('requests')
-      .select('id')
-      .eq('project_owner_id', projectOwnerId)
-      .eq('status', 'pending');
+  async requestExists(projectId, providerUserId, projectOwnerId, directoryProviderId) {
+    try {
+      let query = supabase
+        .from('requests')
+        .select('id')
+        .eq('project_owner_id', projectOwnerId)
+        .eq('status', 'pending');
 
-    if (projectId == null) {
-      query = query.is('project_id', null); // ✅ correct way to compare null
-    } else {
-      query = query.eq('project_id', projectId);
+      if (projectId == null) {
+        query = query.is('project_id', null); // ✅ correct way to compare null
+      } else {
+        query = query.eq('project_id', projectId);
+      }
+
+      const orParts = [];
+      if (providerUserId) orParts.push(`provider_id.eq.${providerUserId}`);
+      if (directoryProviderId) orParts.push(`directory_provider_id.eq.${directoryProviderId}`);
+      if (orParts.length > 0) query = query.or(orParts.join(','));
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      return !!(data && data.length);
+    } catch (error) {
+      console.error('Error checking request existence:', error);
+      return false;
     }
-
-    const orParts = [];
-    if (providerUserId) orParts.push(`provider_id.eq.${providerUserId}`);
-    if (directoryProviderId) orParts.push(`directory_provider_id.eq.${directoryProviderId}`);
-    if (orParts.length > 0) query = query.or(orParts.join(','));
-
-    const { data, error } = await query;
-    if (error) throw error;
-
-    return !!(data && data.length);
-  } catch (error) {
-    console.error('Error checking request existence:', error);
-    return false;
   }
-}
 
 };
