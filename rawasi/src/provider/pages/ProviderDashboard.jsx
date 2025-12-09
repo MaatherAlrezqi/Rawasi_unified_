@@ -9,8 +9,20 @@ import {
 
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { supabase } from '../../lib/supabase';
+//----------------------- PROXY -----------------------
+import ProxyDatabaseHandler from "../../services/database/ProxyDatabaseHandler";
+import RealDatabaseHandler from "../../services/database/RealDatabaseHandler";
+//----------------------- PROXY -----------------------
+import ProviderService from "../../services/ProviderService";
+//----------------------- PROXY -----------------------
+
+const providerService = new ProviderService();
+//----------------------- PROXY -----------------------
+
 
 export default function ProviderDashboard() {
+
+
   const [searchParams] = useSearchParams();
   const projectIdFromUrl = searchParams.get('project');
   
@@ -27,11 +39,18 @@ export default function ProviderDashboard() {
     phase: '',
     status: ''
   });
+  //----------------------- PROXY -----------------------
 
-  // Fetch provider's projects from Supabase
-  useEffect(() => {
-    fetchProviderProjects();
-  }, []);
+  // Fetch provider's projects 
+ useEffect(() => {
+  providerService.getProviderProjects().then((data) => {
+    console.log("Provider Projects:", data);
+    setProjects(data);
+    setLoading(false);
+  });
+}, []);
+
+  //----------------------- PROXY -----------------------
 
   const fetchProviderProjects = async () => {
     try {
@@ -57,11 +76,18 @@ export default function ProviderDashboard() {
       }
 
       // Fetch projects assigned to this provider
-      const { data: projectsData, error } = await supabase
-        .from('projects')
-        .select('*')
-        .eq('provider_id', profile.id)
-        .order('created_at', { ascending: false });
+      //----------------------- PROXY -----------------------
+      console.log("Proxy Log → GET Provider Projects for Provider:", profile.id);
+
+      const projectsData = await providerService.getProjectsByProviderId(profile.id);
+
+      if (!projectsData) {
+      console.error("❌ Proxy returned no projects");
+      setLoading(false);
+       return;
+      }
+    //----------------------- PROXY -----------------------
+
 
       if (error) throw error;
 

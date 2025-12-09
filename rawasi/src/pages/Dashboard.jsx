@@ -1,4 +1,8 @@
 // Enhanced Owner Dashboard - Similar style to Provider but owner-focused
+// ----------------------- PROXY START
+import ownerService from "../services/ownerService"; 
+// ----------------------- PROXY END
+
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -8,8 +12,6 @@ import {
   AlertTriangle, PieChart as PieChartIcon, LineChart as LineChartIcon
 } from 'lucide-react';
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { supabase } from '../lib/supabase';
-
 export default function OwnerDashboard() {
   const [searchParams] = useSearchParams();
   const projectIdFromUrl = searchParams.get('project');
@@ -23,120 +25,36 @@ export default function OwnerDashboard() {
     fetchOwnerProjects();
   }, []);
 
-  const fetchOwnerProjects = async () => {
-    try {
-      setLoading(true);
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-      
-      if (userError || !user) {
-        console.log('❌ User not logged in:', userError);
-        setLoading(false);
-        return;
-      }
+  // ----------------------- PROXY START (fetchOwnerProjects replacement)
+const fetchOwnerProjects = async () => {
+  try {
+    setLoading(true);
 
-      console.log('✅ Current user:', user.id, user.email);
+    console.log("🔍 Loading owner projects using Proxy & OwnerService...");
 
-      // SIMPLE QUERY - Get projects without join first
-      const { data: projectsData, error: projectsError } = await supabase
-        .from('projects')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
+    // Calling the service → goes to Proxy → RealDatabaseHandler
+    const projectsData = await ownerService.getOwnerProjects();
 
-      if (projectsError) {
-        console.error('❌ Error fetching projects:', projectsError);
-        console.error('Error details:', projectsError.message, projectsError.details);
-        throw projectsError;
-      }
+    console.log("📌 Received projects:", projectsData);
 
-      console.log('✅ Fetched projects:', projectsData);
-      console.log('✅ Projects count:', projectsData?.length);
+    setProjects(projectsData);
 
-      if (!projectsData || projectsData.length === 0) {
-        console.log('⚠️ No projects found for user:', user.id);
-        setProjects([]);
-        setLoading(false);
-        return;
-      }
-
-      // Get unique provider IDs
-      const providerIds = [...new Set(
-        projectsData
-          .map(p => p.provider_id)
-          .filter(Boolean)
-      )];
-
-      console.log('📋 Provider IDs to fetch:', providerIds);
-
-      // Fetch provider info separately if needed
-      let providersData = [];
-      if (providerIds.length > 0) {
-        const { data: providers, error: providersError } = await supabase
-          .from('profiles')
-          .select('id, name')  // No email column in profiles!
-          .in('id', providerIds);
-
-        if (providersError) {
-          console.error('⚠️ Error fetching providers:', providersError);
-        } else {
-          providersData = providers || [];
-          console.log('✅ Fetched providers:', providersData);
-        }
-      }
-
-      // Convert to dashboard format
-      const converted = projectsData.map(proj => {
-        const provider = providersData.find(p => p.id === proj.provider_id);
-        
-        return {
-          id: proj.id,
-          name: proj.name,
-          location: proj.location,
-          status: proj.status || 'planning',
-          phase: proj.phase || 'Design',
-          progress: proj.progress_percentage || 0,
-          budget: { 
-            total: proj.budget || 0, 
-            spent: proj.budget_used || 0,
-            remaining: (proj.budget || 0) - (proj.budget_used || 0)
-          },
-          timeline: {
-            months: proj.timeline_months || 12,
-            daysTotal: (proj.timeline_months || 12) * 30,
-            daysElapsed: Math.floor(((proj.timeline_months || 12) * 30) * ((proj.progress_percentage || 0) / 100)),
-            daysRemaining: Math.ceil(((proj.timeline_months || 12) * 30) * (1 - ((proj.progress_percentage || 0) / 100)))
-          },
-          type: proj.type,
-          sizeSqm: proj.size_sqm,
-          floors: proj.n_floors,
-          techNeeds: proj.tech_needs,
-          provider: provider ? {
-            id: provider.id,
-            name: provider.name || 'Provider',
-            rating: 4.5
-          } : null
-        };
-      });
-
-      console.log('✅ Converted projects:', converted);
-
-      setProjects(converted);
-      
-      // Set selected project (from URL or first project)
-      if (projectIdFromUrl && converted.find(p => p.id === projectIdFromUrl)) {
-        setSelectedProject(projectIdFromUrl);
-        console.log('✅ Selected project from URL:', projectIdFromUrl);
-      } else if (converted.length > 0) {
-        setSelectedProject(converted[0].id);
-        console.log('✅ Selected first project:', converted[0].id);
-      }
-    } catch (error) {
-      console.error('❌ Error in fetchOwnerProjects:', error);
-      console.error('Full error:', error.message, error.details, error.hint);
-    } finally {
-      setLoading(false);
+    // Keep project selection logic
+    if (projectIdFromUrl && projectsData.find(p => p.id === projectIdFromUrl)) {
+      setSelectedProject(projectIdFromUrl);
+      console.log("🔗 Selected project from URL:", projectIdFromUrl);
+    } else if (projectsData.length > 0) {
+      setSelectedProject(projectsData[0].id);
+      console.log("👉 Defaulting to first project:", projectsData[0].id);
     }
-  };
+
+  } catch (error) {
+    console.error("❌ Proxy/OwnerService error:", error);
+  } finally {
+    setLoading(false);
+  }
+};
+// ----------------------- PROXY END
 
   const currentProject = projects.find(p => p.id === selectedProject);
 
