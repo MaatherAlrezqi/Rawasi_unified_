@@ -11,9 +11,8 @@ import {
   CheckCircle2,
   AlertCircle,
 } from "lucide-react";
-import { useLocation } from "react-router-dom";
 import { supabase } from "../../lib/supabase";
-
+import { userFactory } from "../../lib/factories/UserFactory";
 export default function Register({ onSubmit }) {
   const [form, setForm] = useState({
     name: "",
@@ -27,17 +26,6 @@ export default function Register({ onSubmit }) {
   const [success, setSuccess] = useState(false);
   const [passwordStrength, setPasswordStrength] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
-
-  const location = useLocation();
-
-  // ✅ Read ?role=provider or ?role=owner from URL and set default role
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const roleParam = params.get("role");
-    if (roleParam === "provider" || roleParam === "owner") {
-      setForm((prev) => ({ ...prev, role: roleParam }));
-    }
-  }, [location.search]);
 
   const checkPasswordStrength = (pass) => {
     let strength = 0;
@@ -79,7 +67,23 @@ export default function Register({ onSubmit }) {
     }
 
     try {
-      // 1) Sign up user with Supabase Auth
+      // STEP 1: Create user object using Factory Pattern
+      const userData = {
+        name: form.name,
+        email: form.email,
+        phone: form.phone,
+        password: form.password,
+        role: form.role,
+        phoneNumber: form.phone,
+        firstName: form.name.split(" ")[0],
+        lastName: form.name.split(" ")[1] || "",
+      };
+
+      // Use factory to create appropriate user instance
+      const userInstance = userFactory.createUser(userData);
+      console.log("User instance created via Factory:", userInstance);
+
+      // STEP 2: Register with Supabase Auth
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: form.email,
         password: form.password,
@@ -88,38 +92,54 @@ export default function Register({ onSubmit }) {
             name: form.name,
             phone: form.phone,
             role: form.role,
+            firstName: userInstance.firstName,
+            lastName: userInstance.lastName,
           },
         },
       });
 
       if (authError) throw authError;
 
-      // 2) Create profile in profiles table (ignore RLS error but don't block)
-      const { error: profileError } = await supabase.from("profiles").insert({
+      //   STEP 3: Create profile in database with user instance data
+      const profileData = {
         id: authData.user.id,
-        name: form.name,
-        phone: form.phone,
-        role: form.role,
-        email: form.email,
+        name: userInstance.firstName + " " + userInstance.lastName,
+        phone: userInstance.phoneNumber,
+        role: userInstance.role,
+        email: userInstance.email,
         created_at: new Date().toISOString(),
-      });
+      };
+
+      // Add role-specific fields
+      if (userInstance.role === "provider") {
+        profileData.company_size = userInstance.companySize;
+        profileData.description = userInstance.description;
+        profileData.website = userInstance.website;
+        profileData.location = userInstance.location;
+        profileData.experience_years = userInstance.experienceYears;
+        profileData.rating = userInstance.rating;
+      } else if (userInstance.role === "owner") {
+        profileData.budget = userInstance.budget;
+        profileData.location = userInstance.location;
+      }
+
+      const { error: profileError } = await supabase
+        .from("profiles")
+        .insert(profileData);
 
       if (profileError) {
         console.warn(
-          "Profile insert error (ignored, RLS probably):",
+          "Profile insert error (may be RLS):",
           profileError.message
         );
-        // Do NOT throw here, we still want local auth + routing to work
       }
 
-      // 3) ALSO register in App.jsx local users (for role-based routing)
+      //   STEP 4: Call parent onSubmit with factory-created user
       if (onSubmit) {
         const result = await onSubmit({
-          name: form.name,
-          email: form.email,
-          phone: form.phone,
-          password: form.password,
-          role: form.role, // "owner" or "provider"
+          ...userData,
+          id: authData.user.id,
+          userInstance: userInstance, // Pass the factory-created instance
         });
 
         if (!result?.ok) {
@@ -130,6 +150,7 @@ export default function Register({ onSubmit }) {
       }
 
       // Success!
+      console.log("  Registration successful!");
       setSuccess(true);
     } catch (error) {
       console.error("Register error:", error);
