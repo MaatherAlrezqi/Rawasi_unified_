@@ -1,14 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import {
-  LogIn,
-  Mail,
-  Lock,
-  Eye,
-  EyeOff,
-  AlertCircle,
-} from "lucide-react";
+import { LogIn, Mail, Lock, Eye, EyeOff, AlertCircle } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 
 export default function Login({ onSubmit, onForgot }) {
@@ -53,7 +46,7 @@ export default function Login({ onSubmit, onForgot }) {
         throw new Error("No user data returned");
       }
 
-      console.log("✅ Login successful:", data.user.email);
+      console.log("  Login successful:", data.user.email);
 
       // Get user profile to determine role
       const { data: profile, error: profileError } = await supabase
@@ -69,7 +62,7 @@ export default function Login({ onSubmit, onForgot }) {
 
       // Determine role from profile or metadata
       let userRole = "owner"; // default
-      
+
       if (profile?.role) {
         userRole = profile.role;
       } else if (data.user.user_metadata?.role) {
@@ -83,7 +76,10 @@ export default function Login({ onSubmit, onForgot }) {
         id: data.user.id,
         email: data.user.email,
         role: userRole,
-        name: profile?.full_name || data.user.user_metadata?.full_name || email.split('@')[0],
+        name:
+          profile?.full_name ||
+          data.user.user_metadata?.full_name ||
+          email.split("@")[0],
         phone: profile?.phone || data.user.user_metadata?.phone || "",
       };
 
@@ -106,11 +102,10 @@ export default function Login({ onSubmit, onForgot }) {
         console.log("Navigating to project page...");
         navigate("/project");
       }
-
     } catch (error) {
       console.error("Login error:", error);
-      
-      // User-friendly error messages
+
+      // error messages
       if (error.message?.includes("Invalid login credentials")) {
         setErr("Invalid email or password. Please check your credentials.");
       } else if (error.message?.includes("Email not confirmed")) {
@@ -293,22 +288,6 @@ export default function Login({ onSubmit, onForgot }) {
           >
             Create one
           </a>
-        </motion.div>
-
-        {/* Demo Credentials Helper (Remove in production) */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.5 }}
-          className="mt-4 text-center"
-        >
-          <details className="text-sm text-slate-500">
-            <summary className="cursor-pointer hover:text-orange-600">Test Accounts</summary>
-            <div className="mt-2 space-y-1">
-              <p className="font-mono">Provider: a.alsudais@alfanar.com</p>
-              <p className="font-mono text-xs">Check Supabase for password</p>
-            </div>
-          </details>
         </motion.div>
       </motion.div>
     </main>
