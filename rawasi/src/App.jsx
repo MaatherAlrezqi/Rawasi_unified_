@@ -32,9 +32,9 @@ import ProviderMessages from "./provider/pages/ProviderMessages.jsx";
 import ProviderReports from "./provider/pages/ProviderReports.jsx";
 import ProviderProfile from "./provider/pages/ProviderProfile.jsx";
 
-import { loadLS, saveLS, uid } from "./lib/utils.js";
-import { seedUsers } from "./lib/auth.js";
+import { loadLS, saveLS } from "./lib/utils.js";
 import { supabase } from "./lib/supabase";
+import { userFactory } from "./lib/factories/UserFactory"; // ✅ Import factory
 
 // ---- Guards ---------------------------------------------------------------
 
@@ -68,19 +68,24 @@ export default function App() {
 
   // Auth state - load from localStorage on mount
   const [auth, setAuth] = useState(() => loadLS("rawasi_auth", null));
-  
-  // Keep old users state for backward compatibility (registration)
-  const [users, setUsers] = useState(() => loadLS("rawasi_users", seedUsers()));
-  
+
   const [otpModal, setOtpModal] = useState({ open: false, email: "" });
   const [forgotModal, setForgotModal] = useState({ open: false });
+
+  // ✅ Store for user instances created by factory
+  const [userInstances, setUserInstances] = useState(() =>
+    loadLS("rawasi_user_instances", {})
+  );
 
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Persist auth state
+  // Persist auth state and user instances
   useEffect(() => saveLS("rawasi_auth", auth), [auth]);
-  useEffect(() => saveLS("rawasi_users", users), [users]);
+  useEffect(
+    () => saveLS("rawasi_user_instances", userInstances),
+    [userInstances]
+  );
 
   // Check for existing Supabase session on mount
   useEffect(() => {
@@ -90,12 +95,13 @@ export default function App() {
   // Function to check if user is already logged in via Supabase
   const checkSupabaseSession = async () => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
       if (session?.user && !auth) {
-        // User has active Supabase session but no app auth state
         console.log("Restoring session for:", session.user.email);
-        
+
         // Get profile to determine role
         const { data: profile } = await supabase
           .from("profiles")
@@ -103,14 +109,38 @@ export default function App() {
           .eq("id", session.user.id)
           .single();
 
-        const userRole = profile?.role || session.user.user_metadata?.role || "owner";
+        const userRole =
+          profile?.role || session.user.user_metadata?.role || "owner";
+
+        // ✅ Recreate user instance from stored data using factory
+        const userData = {
+          id: session.user.id,
+          email: session.user.email,
+          role: userRole,
+          name:
+            profile?.name ||
+            session.user.user_metadata?.name ||
+            session.user.email.split("@")[0],
+          phone: profile?.phone || session.user.user_metadata?.phone || "",
+          password: "", // We don't store passwords
+          ...profile, // Include all profile data
+        };
+
+        // Create user instance via factory
+        const userInstance = userFactory.createUser(userData);
+
+        // Store instance
+        setUserInstances((prev) => ({
+          ...prev,
+          [session.user.id]: userInstance,
+        }));
 
         const authData = {
           id: session.user.id,
           email: session.user.email,
-          role: userRole,
-          name: profile?.name || profile?.full_name || session.user.user_metadata?.full_name || session.user.email.split('@')[0],
-          phone: profile?.phone || session.user.user_metadata?.phone || "",
+          role: userInstance.role,
+          name: userInstance.firstName + " " + userInstance.lastName,
+          phone: userInstance.phoneNumber,
         };
 
         setAuth(authData);
@@ -123,31 +153,52 @@ export default function App() {
 
   // Request notification permission on app load
   useEffect(() => {
-    if ('Notification' in window && Notification.permission === 'default') {
+    if ("Notification" in window && Notification.permission === "default") {
       Notification.requestPermission();
     }
   }, []);
 
-  // Show progress only on flow routes (not on Landing or Dashboard)
+  // Show progress only on flow routes
   const showFlowProgress = ["/project", "/recs", "/messages"].some((p) =>
     location.pathname.startsWith(p)
   );
 
-  // Detect provider area for layout (optional)
+  // Detect provider area for layout
   const isProviderArea = location.pathname.startsWith("/provider");
 
   // ---- Auth handlers -------------------------------------------------------
 
+  /**
+   * ✅ Updated registration handler to work with Factory Pattern
+   */
   function handleRegister(payload) {
-    if (
-      users.some((u) => u.email.toLowerCase() === payload.email.toLowerCase())
-    ) {
-      return { ok: false, error: "Email already registered" };
+    try {
+      // The factory-created user instance is passed from Register.jsx
+      const { userInstance, ...userData } = payload;
+
+      if (!userInstance) {
+        console.error("No user instance provided from factory");
+        return { ok: false, error: "User creation failed" };
+      }
+
+      // Store the user instance
+      setUserInstances((prev) => ({
+        ...prev,
+        [userData.id]: userInstance,
+      }));
+
+      console.log("✅ User registered via Factory Pattern:", userInstance);
+      console.log("User role:", userInstance.role);
+      console.log("User type:", userInstance.constructor.name);
+
+      // Navigate to verification
+      setOtpModal({ open: true, email: userData.email });
+
+      return { ok: true };
+    } catch (error) {
+      console.error("Registration error in App:", error);
+      return { ok: false, error: error.message };
     }
-    const newUser = { id: uid(), ...payload, createdAt: Date.now() };
-    setUsers((prev) => [...prev, newUser]);
-    setOtpModal({ open: true, email: payload.email });
-    return { ok: true };
   }
 
   function verifyOtp(code) {
@@ -159,59 +210,65 @@ export default function App() {
     return { ok: true };
   }
 
+  /**
+   * ✅ Updated login handler
+   */
   function handleLogin({ email, password }) {
-    // This is now just for setting app state
-    // Actual authentication happens in Login.jsx via Supabase
-    
-    // Get auth data from localStorage (set by Login.jsx)
+    // Auth is handled in Login.jsx via Supabase
+    // This just sets app state
+
     const authData = JSON.parse(localStorage.getItem("rawasi_auth") || "null");
-    
+
     if (authData) {
       console.log("Setting auth state:", authData);
       setAuth(authData);
-      return { ok: true };
-    }
 
-    // Fallback: check old localStorage users for backward compatibility
-    const user = users.find(
-      (u) =>
-        u.email.toLowerCase() === email.toLowerCase() &&
-        u.password === password
-    );
-    
-    if (user) {
-      const legacyAuthData = {
-        id: user.id,
-        name: user.name,
-        role: user.role,
-        email: user.email,
-        phone: user.phone,
-      };
-      
-      setAuth(legacyAuthData);
-      
-      if (legacyAuthData.role === "provider") {
-        navigate("/provider/dashboard");
-      } else {
-        navigate("/project");
+      // ✅ Get or create user instance for this session
+      let userInstance = userInstances[authData.id];
+
+      if (!userInstance) {
+        // Recreate from stored data
+        try {
+          userInstance = userFactory.createUser({
+            ...authData,
+            password: "", // Don't store password
+          });
+
+          setUserInstances((prev) => ({
+            ...prev,
+            [authData.id]: userInstance,
+          }));
+
+          console.log("✅ User instance recreated on login:", userInstance);
+        } catch (error) {
+          console.error("Error recreating user instance:", error);
+        }
       }
-      
+
       return { ok: true };
     }
 
     return { ok: false, error: "Invalid credentials" };
   }
 
+  /**
+   * ✅ Get current user instance
+   */
+  function getCurrentUserInstance() {
+    if (!auth) return null;
+    return userInstances[auth.id];
+  }
+
   async function logout() {
     // Sign out from Supabase
     await supabase.auth.signOut();
-    
+
     // Clear app state
     setAuth(null);
     localStorage.removeItem("rawasi_auth");
     localStorage.removeItem("user");
     localStorage.removeItem("profile");
-    
+
     // Redirect to landing
     navigate("/");
   }
@@ -220,7 +277,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-white text-slate-900 flex flex-col">
-      {/* Header is hidden on provider area if you want full-screen provider UI */}
       {!isProviderArea && (
         <Header logoUrl={rawasiLogo} auth={auth} onLogout={logout} />
       )}
@@ -278,6 +334,7 @@ export default function App() {
               <Dashboard
                 project={project}
                 onStartProject={() => navigate("/project")}
+                userInstance={getCurrentUserInstance()}
               />
             }
           />
@@ -285,7 +342,7 @@ export default function App() {
             path="/my-requests"
             element={
               <RequireAuth>
-                <MyRequests />
+                <MyRequests userInstance={getCurrentUserInstance()} />
               </RequireAuth>
             }
           />
@@ -293,7 +350,7 @@ export default function App() {
             path="/owner-requests"
             element={
               <RequireAuth>
-                <OwnerRequests />
+                <OwnerRequests userInstance={getCurrentUserInstance()} />
               </RequireAuth>
             }
           />
@@ -303,7 +360,7 @@ export default function App() {
             path="/provider/dashboard"
             element={
               <RequireRole role="provider" auth={auth}>
-                <ProviderDashboard />
+                <ProviderDashboard userInstance={getCurrentUserInstance()} />
               </RequireRole>
             }
           />
@@ -311,7 +368,7 @@ export default function App() {
             path="/provider/projects"
             element={
               <RequireRole role="provider" auth={auth}>
-                <ProviderProjects />
+                <ProviderProjects userInstance={getCurrentUserInstance()} />
               </RequireRole>
             }
           />
@@ -319,7 +376,7 @@ export default function App() {
             path="/provider/requests"
             element={
               <RequireRole role="provider" auth={auth}>
-                <ProviderRequests />
+                <ProviderRequests userInstance={getCurrentUserInstance()} />
               </RequireRole>
             }
           />
@@ -327,7 +384,7 @@ export default function App() {
             path="/provider/messages"
             element={
               <RequireRole role="provider" auth={auth}>
-                <ProviderMessages />
+                <ProviderMessages userInstance={getCurrentUserInstance()} />
               </RequireRole>
             }
           />
@@ -335,7 +392,7 @@ export default function App() {
             path="/provider/reports"
             element={
               <RequireRole role="provider" auth={auth}>
-                <ProviderReports />
+                <ProviderReports userInstance={getCurrentUserInstance()} />
               </RequireRole>
             }
           />
@@ -343,7 +400,7 @@ export default function App() {
             path="/provider/profile"
             element={
               <RequireRole role="provider" auth={auth}>
-                <ProviderProfile />
+                <ProviderProfile userInstance={getCurrentUserInstance()} />
               </RequireRole>
             }
           />
@@ -353,7 +410,7 @@ export default function App() {
         </Routes>
       </main>
 
-      {/* Modals always available */}
+      {/* Modals */}
       <OtpModal
         open={otpModal.open}
         email={otpModal.email}
@@ -365,7 +422,6 @@ export default function App() {
         onClose={() => setForgotModal({ open: false })}
       />
 
-      {/* Footer hidden for provider area too */}
       {!isProviderArea && <Footer logoUrl={rawasiLogo} />}
     </div>
   );
